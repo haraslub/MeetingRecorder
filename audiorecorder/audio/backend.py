@@ -202,10 +202,21 @@ class CaptureBackend(ABC):
         self._mic_muted = value
 
 
+METER_FLOOR_DB = -54.0
+METER_CEIL_DB = -6.0
+
+
 def rms_level(data):
-    """Level for the meters, 0 to 1. Shared so both backends drive the bars identically."""
+    """Level for the meters, 0 to 1. Shared so both backends drive the bars identically.
+
+    A decibel scale, because speech and music sit between -35 and -10 dBFS: a linear scale
+    fills the bar for almost every chunk and hides the changes in loudness.
+    """
     rms = float(np.sqrt(np.mean(data**2)))
-    return min(1.0, rms * 10)
+    if rms <= 0.0:
+        return 0.0
+    db = 20.0 * np.log10(rms)
+    return float(min(1.0, max(0.0, (db - METER_FLOOR_DB) / (METER_CEIL_DB - METER_FLOOR_DB))))
 
 
 def create_backend(platform_name=None):

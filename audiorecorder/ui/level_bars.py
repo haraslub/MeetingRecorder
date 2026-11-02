@@ -8,7 +8,13 @@ from audiorecorder.ui import theme
 from audiorecorder.ui.widgets import IconLabel, set_prop
 
 N_BARS = 30
-DECAY = 0.85
+DECAY = 0.6
+# The bars show loudness relative to the last 3 s, because compressed music and calls keep
+# an almost constant level that a fixed scale draws as full bars.
+RANGE_TICKS = 60
+MIN_SPAN = 0.08
+FULL_PRESENCE = 0.5
+SILENCE = 0.08
 
 
 def _mix(low, high, t):
@@ -28,6 +34,7 @@ class BarWidget(QWidget):
         self._low = low
         self._high = high
         self._levels = collections.deque([0.0] * bar_count, maxlen=bar_count)
+        self._history = collections.deque(maxlen=RANGE_TICKS)
         self._current_level = 0.0
         self._active = False
         self.setFixedHeight(36)
@@ -41,12 +48,26 @@ class BarWidget(QWidget):
         self.update()
 
     def advance(self):
-        smoothed = self._levels[-1] * DECAY + self._current_level * (1 - DECAY)
-        self._levels.append(max(self._current_level, smoothed))
+        display = self._relative(self._current_level)
+        smoothed = self._levels[-1] * DECAY + display * (1 - DECAY)
+        self._levels.append(max(display, smoothed))
         self.update()
+
+    def _relative(self, level):
+        if level < SILENCE:
+            return 0.0
+        # Pauses stay out of the range, or the gaps between words would set its bottom.
+        self._history.append(level)
+        ordered = sorted(self._history)
+        top = ordered[len(ordered) * 9 // 10]
+        bottom = ordered[len(ordered) // 10]
+        span = max(top - bottom, MIN_SPAN)
+        position = max(0.0, min(1.0, (level - (top + bottom - span) / 2) / span))
+        return (0.1 + 0.9 * position) * min(1.0, top / FULL_PRESENCE)
 
     def reset(self):
         self._levels = collections.deque([0.0] * self._bar_count, maxlen=self._bar_count)
+        self._history.clear()
         self._current_level = 0.0
         self.update()
 
@@ -64,8 +85,8 @@ class BarWidget(QWidget):
         low, high, flat = theme.color(self._low), theme.color(self._high), theme.color("meter.flat")
         for i, level in enumerate(self._levels):
             if self._active:
-                bar_h = 4 + min(1.0, level * 1.4) * 26
-                color = _mix(low, high, min(1.0, level * 1.5))
+                bar_h = 4 + level * 26
+                color = _mix(low, high, level)
             else:
                 bar_h, color = 4, flat
             x = 8 + i * (bar_w + gap)

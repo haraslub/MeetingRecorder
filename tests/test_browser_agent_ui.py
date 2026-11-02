@@ -20,7 +20,9 @@ def test_browser_detection_prompts_without_starting_audio_and_stops_with_setting
             return {"ok": True, "profile": {
                 "instanceId": "test", "label": "Test browser", "protocolVersion": 4,
                 "agentAccess": True, "tools": [{"id": "meetings.web.googleMeet", "enabled": True}],
-            }, "value": {"meetings": [{"key": "meet.google.com/abc-defg-hij", "title": "Test"}]}}
+            }, "value": {"meetings": [
+                {"key": "meet.google.com/abc-defg-hij", "title": "Test", "tabId": 4},
+            ]}}
 
         app = QApplication([])
         mw.BrowserAgentDetector = lambda **kwargs: BrowserAgentDetector(

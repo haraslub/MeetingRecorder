@@ -36,16 +36,20 @@ disabled access and connection failures as plain text, refreshing from the cache
 
 ## Prompt contract
 
-Candidates use `browser:<instanceId>:<meeting key>` as their identity, the service name, tab
-title and source `browser-agent`. Duplicate tabs with the same profile and meeting key produce
-one candidate. The generic `MeetingCandidate.prompt_immediately` field asks the prompt policy
+Candidates use `browser:<instanceId>:<tabId>:<meeting key>` as their identity, the service name,
+tab title and source `browser-agent`. The tab is part of the identity because the prompt policy
+offers a candidate once until it disappears: without it, the same link opened again in a new tab,
+even right after the old one closed, kept the old identity and got no prompt. Two tabs of one
+meeting are two candidates; the policy still shows one prompt per poll. The generic `MeetingCandidate.prompt_immediately` field asks the prompt policy
 to offer this candidate on its first observation, without adding the native-window stability
 delay after the browser poll. Native candidates retain their existing two-observation policy.
 No generic detector branches on Browser Agent's implementation or source name.
 
 The existing lifecycle still requires the user's recording action. Browser candidates supply
 no joined/end observations, and cannot trigger automatic recording or automatic stopping.
-Dismissal suppresses another prompt until the candidate disappears. Permission failures clear
+Dismissal suppresses another prompt until the candidate disappears. Leaving and rejoining a call
+in the same tab keeps the identity, because Meet keeps the meeting URL on its "you left" page and
+Browser Agent reports no joined state, so a rejoin in the same tab gets no new prompt. Permission failures clear
 the affected candidates, so recovery may offer a new prompt.
 
 ## Constraints and trade-offs
@@ -60,8 +64,8 @@ the affected candidates, so recovery may offer a new prompt.
   cannot delay another profile's result. No strict
   15-second guarantee is possible when a profile does not respond promptly.
 - Detection is supported on Windows and macOS. Linux has no Browser Agent transport here.
-- Browser Agent truncates keys. Different tabs with a colliding key within a profile collapse
-  to one advisory candidate. Profile identity prevents collisions between profiles.
+- Browser Agent truncates keys at 300 characters; the tab ID keeps colliding keys apart within a
+  profile, and profile identity between profiles.
 
 ## Verification
 

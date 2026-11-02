@@ -89,8 +89,8 @@ def test_multiple_profiles_only_call_enabled_meeting_tools_with_stable_keys():
     with running(detector):
         first = detector.scan()
         assert {c.key for c in first} == {
-            "browser:work:meet.google.com/abc-defg-hij",
-            "browser:home:meet.google.com/abc-defg-hij",
+            "browser:work:4:meet.google.com/abc-defg-hij",
+            "browser:home:4:meet.google.com/abc-defg-hij",
         }
         assert [c.app_name for c in first] == ["Google Meet", "Zoom Web"]
         assert all(c.source == "browser-agent" for c in first)
@@ -125,7 +125,9 @@ def test_disabled_access_tools_and_incompatible_versions_do_not_call(kwargs):
 @pytest.mark.parametrize("failure", [TimeoutError("timeout"), OSError("disconnected"),
                                      {"ok": False, "code": "permission_missing"},
                                      response(version=3), {"ok": True},
-                                     {**response(), "value": {"meetings": [None]}}])
+                                     {**response(), "value": {"meetings": [None]}},
+                                     {**response(), "value": {"meetings": [
+                                         {"key": "meet.google.com/abc-defg-hij", "title": "x"}]}}])
 def test_failed_calls_clear_candidates_and_do_not_prevent_other_profiles(failure):
     failing = threading.Event()
 
@@ -142,7 +144,7 @@ def test_failed_calls_clear_candidates_and_do_not_prevent_other_profiles(failure
         failing.set()
         wait_for(lambda: "not connected" in detector.status().summary)
         assert [candidate.key for candidate in detector.scan()] == [
-            "browser:good:meet.google.com/abc-defg-hij",
+            "browser:good:4:meet.google.com/abc-defg-hij",
         ]
 
 
@@ -223,6 +225,24 @@ def test_real_detector_chain_produces_only_one_advisory_prompt():
         assert policy.next_prompt(combined.scan()).title == "Weekly meeting"
         assert policy.next_prompt(combined.scan()) is None
         assert combined.observations() == ()
+
+
+def test_the_same_link_reopened_in_a_new_tab_prompts_again():
+    LINK = "meet.google.com/meet/abc-defg-hij"
+    tab = [4]
+
+    def transport(endpoint, message, stopped):
+        meeting = {"key": LINK, "title": "Weekly meeting", "tabId": tab[0]}
+        return {**response(), "value": {"meetings": [meeting]}}
+
+    detector = browser.BrowserAgentDetector(lambda: ("work",), transport, poll_seconds=.02)
+    with running(detector):
+        policy = MeetingPromptPolicy()
+        assert policy.next_prompt(detector.scan()).key == f"browser:work:4:{LINK}"
+        assert policy.next_prompt(detector.scan()) is None
+        tab[0] = 9
+        wait_for(lambda: detector.scan()[0].key.startswith("browser:work:9:"))
+        assert policy.next_prompt(detector.scan()).key == f"browser:work:9:{LINK}"
 
 
 @contextmanager

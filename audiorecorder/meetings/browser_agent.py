@@ -336,11 +336,16 @@ class BrowserAgentDetector:
                 if not isinstance(value, dict) or not isinstance(value.get("meetings"), list):
                     raise ValueError("invalid meeting list")
                 for meeting in value["meetings"]:
-                    if (not isinstance(meeting, dict) or not isinstance(meeting.get("key"), str)
-                            or not meeting["key"] or not isinstance(meeting.get("title"), str)):
+                    tab = meeting.get("tabId") if isinstance(meeting, dict) else None
+                    if (not isinstance(meeting, dict)
+                            or not isinstance(meeting.get("key"), str) or not meeting["key"]
+                            or not isinstance(meeting.get("title"), str)
+                            or not isinstance(tab, int) or isinstance(tab, bool)):
                         raise ValueError("invalid meeting")
+                    # The tab is part of the identity: the same link opened again in a new tab
+                    # is a new meeting and gets its own prompt.
                     candidates.append(MeetingCandidate(
-                        f"browser:{instance}:{meeting['key']}", MEETING_TOOLS[tool],
+                        f"browser:{instance}:{tab}:{meeting['key']}", MEETING_TOOLS[tool],
                         meeting["title"], source="browser-agent", prompt_immediately=True,
                     ))
         except (OSError, ValueError, TypeError) as error:
