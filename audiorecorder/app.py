@@ -7,7 +7,7 @@ from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication
 
-from audiorecorder.config import load_config, save_config
+from audiorecorder.config import load_config, move_legacy_output_dir, save_config
 from audiorecorder.single_instance import LEGACY_SERVER_NAME, SingleInstance, user_server_name
 from audiorecorder.ui import theme
 from audiorecorder.ui.main_window import MainWindow
@@ -134,6 +134,7 @@ def main():
         return
 
     cfg = load_config()
+    move_legacy_output_dir(cfg)
     os.makedirs(cfg["output_dir"], exist_ok=True)
     save_config(cfg)
     updates = AppUpdates.create(app)

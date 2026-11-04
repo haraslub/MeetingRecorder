@@ -70,6 +70,8 @@ class StateCard(QFrame):
         rec_line.addWidget(self._muted_chip)
         rec_line.addWidget(self._rec_text, 1)
         self._rec_holder = _holder(rec_line)
+        self._slides_text = QLabel()
+        self._slides_text.setObjectName("slidesLine")
 
         alert_line = _row(6)
         self._alert_icon = IconLabel("triangle-alert", "error", 14)
@@ -92,6 +94,7 @@ class StateCard(QFrame):
 
         for holder in (self._idle_holder, self._rec_holder, self._alert_holder, self._dict_holder):
             left.addWidget(holder)
+        left.addWidget(self._slides_text)
 
         self.timer = QLabel("00:00:00")
         self.timer.setObjectName("timer")
@@ -211,6 +214,7 @@ class StateCard(QFrame):
         self._idle_holder.setVisible(state in ("idle", "starting"))
         self._idle_text.setText("Starting capture…" if state == "starting" else "Ready to record")
         self._rec_holder.setVisible(recording)
+        self._slides_text.setVisible(recording and bool(self._slides_text.text()))
         self._muted_chip.setVisible(self._muted)
         if recording_line is not None:
             self._rec_text.setText(recording_line)
@@ -255,6 +259,11 @@ class StateCard(QFrame):
             self._preview_text.setText("")
             self._pasted_text.setText("")
         self._render_buttons()
+
+    def set_slides(self, text):
+        """The slide capture state under the recording line; empty hides it."""
+        self._slides_text.setText(text)
+        self._slides_text.setVisible(self._state in ("recording", "stopping") and bool(text))
 
     def set_preview(self, text):
         self._preview_text.setText(text)

@@ -64,6 +64,9 @@ class CaptureBackend(ABC):
         self._write_failure_reported = False
         self._mic_muted = False
         self._is_recording = False
+        # The uuid in the names of this recording's temporary files; other temporary data of
+        # the same recording (slide snapshots) carries it, so crash recovery can pair them.
+        self.capture_stamp = None
         self._active_system_source = None
         self._active_mic_source = None
         self._system_tap = None

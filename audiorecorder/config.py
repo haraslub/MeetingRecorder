@@ -16,10 +16,14 @@ from pathlib import Path
 
 import platformdirs
 
+from audiorecorder.slides.selector import SlideTuning
+
 # "AudioRecorder", not the current product name: this decides where an existing
 # installation already keeps its settings. Renaming it would strand what is there.
 CONFIG_DIR = Path(platformdirs.user_config_dir("AudioRecorder", appauthor=False))
 CONFIG_PATH = CONFIG_DIR / "config.json"
+# The default output folder before it was named after the product.
+LEGACY_OUTPUT_DIR = Path.home() / "AudioRecordings"
 
 DEFAULT_SUMMARY_PROMPT = (
     'Summarize the call transcript in the file "{transcript_name}" and write the summary '
@@ -27,7 +31,7 @@ DEFAULT_SUMMARY_PROMPT = (
 )
 
 DEFAULTS = {
-    "output_dir": str(Path.home() / "AudioRecordings"),
+    "output_dir": str(Path.home() / "MeetingRecorder"),
     # Primary language of the transcript. When translation is on and the recording turns
     # out to be in another language, it is translated into this one.
     "language": "en",
@@ -47,6 +51,11 @@ DEFAULTS = {
     # Live speaker labels open two additional realtime streams (system + microphone), so
     # they are explicit opt-in just like translated subtitles.
     "live_speakers": False,
+    # Slide snapshots grab the Meet or Teams browser window during a recording. A
+    # snapshot can show private content, so they are opt-in.
+    "slide_snapshots": False,
+    # Thresholds of the slide selector, changed in Settings; see slides.selector.SlideTuning.
+    "slide_tuning": SlideTuning().to_config(),
     # A local-only signal offers the Record button when a meeting window is stable. It
     # never records automatically, but it opens the loopback browser bridge, so it is
     # opt-in like every other listener.
@@ -95,6 +104,7 @@ def validated_config(stored):
             cfg[key] = None
     if not isinstance(cfg["output_dir"], str) or not cfg["output_dir"].strip():
         cfg["output_dir"] = DEFAULTS["output_dir"]
+    cfg["slide_tuning"] = SlideTuning.from_config(cfg["slide_tuning"]).to_config()
     from audiorecorder.meetings.native_profiles import PROFILES
 
     for name in ("native_call_qualifications", "native_call_absence_qualifications"):
@@ -155,6 +165,37 @@ def load_config():
         backup.write_bytes(CONFIG_PATH.read_bytes())
         logging.getLogger(__name__).warning("Invalid settings preserved at %s", backup)
         return validated_config({})
+
+
+def _same_path(first, second):
+    return os.path.normcase(os.path.abspath(first)) == os.path.normcase(os.path.abspath(second))
+
+
+def move_legacy_output_dir(cfg, legacy=LEGACY_OUTPUT_DIR, current=None):
+    """Move recordings from the old default folder to the new one, once.
+
+    Only an output folder that is still the old default moves; a folder the user chose stays.
+    When the new folder already exists, or the old one cannot be renamed (a window has it
+    open), nothing moves and the settings keep the old folder. Returns True when the
+    settings changed.
+    """
+    current = Path(current or DEFAULTS["output_dir"])
+    if not _same_path(cfg["output_dir"], legacy) or os.path.lexists(current):
+        return False
+    if os.path.lexists(legacy):
+        try:
+            os.rename(legacy, current)
+        except OSError:
+            logging.getLogger(__name__).warning(
+                "The output folder %s could not be renamed to %s", legacy, current)
+            return False
+    cfg["output_dir"] = str(current)
+    # The audio test was made in the same folder under its old name; it stays valid.
+    readiness = cfg.get("capture_readiness")
+    if isinstance(readiness, dict) and isinstance(readiness.get("config"), dict) and _same_path(
+            readiness["config"].get("output_dir") or "", legacy):
+        readiness["config"]["output_dir"] = str(current)
+    return True
 
 
 def save_config(cfg):

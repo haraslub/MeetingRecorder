@@ -161,6 +161,7 @@ class PortAudioBackend(CaptureBackend):
         # None means "the platform default", and this platform has no default system
         # source, so both None and the explicit choice mean microphone only.
         stamp = uuid.uuid4().hex
+        self.capture_stamp = stamp
 
         try:
             system_device = None

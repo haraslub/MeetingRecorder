@@ -20,6 +20,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from audiorecorder.recordings.manager import SLIDES
 from audiorecorder.ui import icons, theme
 from audiorecorder.ui.widgets import BusyBar, Chip, ElidedLabel, fade, set_prop, spaced
 
@@ -28,6 +29,7 @@ BADGES = (
     (".summary.md", "sparkles", "AI summary"),
     (".live.md", "captions", "Live subtitles"),
     (".speakers.md", "users", "Speaker transcript"),
+    (SLIDES, "presentation", "Slides"),
 )
 QUEUED = "Queued"
 BUSY_TIP = "Busy: you can move or delete this recording when the job ends."
@@ -57,6 +59,8 @@ class RecordingItemWidget(QFrame):
     move_clicked = pyqtSignal(str)
     delete_clicked = pyqtSignal(str)
     open_transcript_clicked = pyqtSignal(str)
+    open_folder_clicked = pyqtSignal(str)
+    copy_folder_name_clicked = pyqtSignal(str)
     details_clicked = pyqtSignal(str)
 
     def __init__(self, recording):
@@ -124,9 +128,15 @@ class RecordingItemWidget(QFrame):
                 badge.setStyleSheet(
                     "QToolButton { border: none; padding: 0px; background: transparent; }")
                 badge.setFixedSize(16, 16)
-                target = os.path.splitext(self.recording.path)[0] + suffix
-                badge.clicked.connect(
-                    lambda _checked=False, path=target: self.open_transcript_clicked.emit(path))
+                if suffix == SLIDES and self.recording.folder:
+                    # The snapshots are files in the recording's folder.
+                    badge.clicked.connect(lambda _checked=False: self.open_folder_clicked.emit(
+                        self.recording.folder))
+                else:
+                    target = os.path.splitext(self.recording.path)[0] + suffix
+                    badge.clicked.connect(
+                        lambda _checked=False, path=target:
+                            self.open_transcript_clicked.emit(path))
                 meta.addWidget(badge)
                 self._badges.append((badge, glyph))
         meta.addStretch()
@@ -250,6 +260,15 @@ class RecordingItemWidget(QFrame):
         cleanup.triggered.connect(lambda: self.cleanup_clicked.emit(self.recording.path))
         if not self.recording.is_transcribed:
             cleanup.setToolTip("Transcribe the recording first")
+        folder = self.recording.folder or os.path.dirname(self.recording.path)
+        open_folder = menu.addAction(icons.icon("folder-open", tint, 16), "Open folder")
+        open_folder.triggered.connect(lambda: self.open_folder_clicked.emit(folder))
+        copy_name = menu.addAction(icons.icon("copy", tint, 16), "Copy folder name")
+        copy_name.setEnabled(bool(self.recording.folder))
+        copy_name.triggered.connect(
+            lambda: self.copy_folder_name_clicked.emit(self.recording.folder))
+        if not self.recording.folder:
+            copy_name.setToolTip("This recording has no folder of its own")
         move = menu.addAction(icons.icon("folder-input", tint, 16), "Move to folder…")
         move.triggered.connect(lambda: self.move_clicked.emit(self.recording.path))
         menu.addSeparator()
@@ -309,6 +328,8 @@ class RecordingListWidget(QWidget):
     move_requested = pyqtSignal(str)
     delete_requested = pyqtSignal(str)
     open_transcript_requested = pyqtSignal(str)
+    open_folder_requested = pyqtSignal(str)
+    copy_folder_name_requested = pyqtSignal(str)
     details_requested = pyqtSignal(str)
     add_requested = pyqtSignal()
 
@@ -425,6 +446,8 @@ class RecordingListWidget(QWidget):
             item_widget.move_clicked.connect(self.move_requested.emit)
             item_widget.delete_clicked.connect(self.delete_requested.emit)
             item_widget.open_transcript_clicked.connect(self.open_transcript_requested.emit)
+            item_widget.open_folder_clicked.connect(self.open_folder_requested.emit)
+            item_widget.copy_folder_name_clicked.connect(self.copy_folder_name_requested.emit)
             item_widget.details_clicked.connect(self.details_requested.emit)
             self._rows_layout.insertWidget(self._rows_layout.count() - 1, item_widget)
             self._item_widgets.append(item_widget)

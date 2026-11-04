@@ -37,9 +37,23 @@ def test_orphaned_captures_are_found_with_and_without_system_audio(tmp_path):
 
     captures = RecordingManager(str(tmp_path)).orphaned_captures()
 
-    assert [(system, mic) for system, mic, _ in captures] == [
-        (str(tmp_path / "_rec_system_a.wav"), str(tmp_path / "_rec_mic_a.wav")),
-        (None, str(tmp_path / "_rec_mic_b.wav")),
+    assert [(system, mic, slides) for system, mic, slides, _ in captures] == [
+        (str(tmp_path / "_rec_system_a.wav"), str(tmp_path / "_rec_mic_a.wav"), None),
+        (None, str(tmp_path / "_rec_mic_b.wav"), None),
+    ]
+
+
+def test_slide_snapshots_pair_with_the_capture_of_the_same_stamp(tmp_path):
+    tone(tmp_path / "_rec_mic_a.wav")
+    tone(tmp_path / "_rec_mic_b.wav")
+    (tmp_path / "_rec_slides_a").mkdir()
+    (tmp_path / "_rec_slides_other").mkdir()
+
+    captures = RecordingManager(str(tmp_path)).orphaned_captures()
+
+    assert [(mic, slides) for _, mic, slides, _ in captures] == [
+        (str(tmp_path / "_rec_mic_a.wav"), str(tmp_path / "_rec_slides_a")),
+        (str(tmp_path / "_rec_mic_b.wav"), None),
     ]
 
 
@@ -80,7 +94,9 @@ def test_start_up_encodes_a_capture_left_by_a_killed_session(tmp_path):
         QTimer.singleShot(15000, lambda: app.exit(9))
         assert app.exec() == 0
         names = sorted(path.name for path in directory.iterdir())
-        assert len([name for name in names if name.endswith('.m4a')]) == 1, names
+        folders = [path for path in directory.iterdir() if path.is_dir()]
+        assert len(folders) == 1, names
+        assert (folders[0] / (folders[0].name + '.m4a')).is_file(), names
         assert not [name for name in names if name.startswith('_rec_')], names
         assert 'Unrecovered_mic_b.wav' in names, names
     """, tmp_path)
@@ -97,6 +113,7 @@ def test_closing_during_a_recording_asks_and_the_session_end_stops_capture(tmp_p
         class Backend:
             active_system_source = 'Test system'
             active_mic_source = 'Test microphone'
+            capture_stamp = 'test'
             stopped = False
             def set_level_callbacks(self, *args): pass
             def set_error_callback(self, callback): pass
@@ -136,3 +153,57 @@ def test_closing_during_a_recording_asks_and_the_session_end_stops_capture(tmp_p
         QTimer.singleShot(5000, lambda: app.exit(9))
         assert app.exec() == 0
     """, tmp_path)
+
+
+def snapshots(folder, *names):
+    folder.mkdir()
+    for name in names:
+        (folder / name).write_bytes(b"jpeg")
+
+
+RECOVER = """
+    import sys
+    from pathlib import Path
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication
+    from audiorecorder.ui import main_window as mw
+
+    mw.MainWindow._show_recording_error = lambda self, *args: None
+    app = QApplication([])
+    directory = Path(sys.argv[1])
+    window = mw.MainWindow({'output_dir': str(directory), 'meeting_detection': False})
+
+    def check():
+        if not window._encoder_queue and not window._active_encoders:
+            app.quit()
+        else:
+            QTimer.singleShot(50, check)
+
+    QTimer.singleShot(0, check)
+    QTimer.singleShot(15000, lambda: app.exit(9))
+    assert app.exec() == 0
+    names = sorted(path.name for path in directory.iterdir())
+"""
+
+
+def test_start_up_attaches_the_slides_of_a_killed_session(tmp_path):
+    tone(tmp_path / "_rec_mic_a.wav")
+    tone(tmp_path / "_rec_system_a.wav")
+    snapshots(tmp_path / "_rec_slides_a", "0001 00-00-04.jpg", "0002 00-00-40.jpg")
+    run_window(RECOVER + """
+    (folder,) = [path for path in directory.iterdir() if path.is_dir()]
+    assert sorted(p.name for p in folder.iterdir()) == [
+        '0001 00-00-04.jpg', '0002 00-00-40.jpg', folder.name + '.m4a', 'slides.md'], names
+    assert not [name for name in names if name.startswith('_rec_')], names
+""", tmp_path)
+
+
+def test_a_recovery_encode_error_keeps_the_slides_beside_the_audio(tmp_path):
+    (tmp_path / "_rec_mic_b.wav").write_bytes(b"not audio")
+    snapshots(tmp_path / "_rec_slides_b", "0001 00-00-04.jpg")
+    run_window(RECOVER + """
+    assert 'Unrecovered_mic_b.wav' in names, names
+    assert (directory / '_rec_slides_b' / '0001 00-00-04.jpg').exists(), names
+    assert [path for path in directory.iterdir() if path.is_dir()] == [
+        directory / '_rec_slides_b'], names
+""", tmp_path)

@@ -186,6 +186,12 @@ QPushButton[toggle="live"]:hover { background-color: @bg.hover; color: @text.pri
 QPushButton[toggle="live"]:checked { background-color: @live.fill; border-color: @live.fill;
     color: @text.onFill; font-weight: 600; }
 QPushButton[toggle="live"]:checked:hover { background-color: @live.fillHover; }
+QPushButton[toggle="local"] { padding: 0px 10px; background-color: @bg.raised;
+    color: @text.secondary; }
+QPushButton[toggle="local"]:hover { background-color: @bg.hover; color: @text.primary; }
+QPushButton[toggle="local"]:checked { background-color: @accent.fill; border-color: @accent.fill;
+    color: @text.onFill; font-weight: 600; }
+QPushButton[toggle="local"]:checked:hover { background-color: @accent.fillHover; }
 
 QPushButton#recordButton { min-height: 44px; max-height: 44px; border-radius: 22px;
     padding: 0px 22px 0px 18px;
@@ -214,6 +220,7 @@ QLabel#stateLine { font-size: 12px; font-weight: 500; color: @text.tertiary; }
 QLabel#stateLine[tone="error"] { color: @error; font-weight: 600; }
 QLabel#stateLine[tone="live"] { color: @live; font-weight: 600; }
 QLabel#recLine { font-size: 12px; font-weight: 500; color: @text.secondary; }
+QLabel#slidesLine { font-size: 12px; color: @text.secondary; }
 QLabel#failTitle { font-size: 14px; font-weight: 500; }
 QLabel#failDetail, QLabel#hint, QLabel#keyHint { font-size: 12px; color: @text.secondary; }
 QLabel#failDetail { font-size: 13px; }

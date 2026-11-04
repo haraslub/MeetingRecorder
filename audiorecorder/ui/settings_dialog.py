@@ -1,3 +1,4 @@
+import html
 import sys
 
 from PyQt6.QtCore import QEvent, QSize, Qt, QTimer, QUrl
@@ -7,6 +8,7 @@ from PyQt6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
     QGroupBox,
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import (
     QSpinBox,
     QTabWidget,
     QToolButton,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -29,9 +32,44 @@ from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
 from audiorecorder.meetings.browser_agent import DOWNLOAD_URL, extension_folder, host_manifests
 from audiorecorder.meetings.native_calls import PROFILES, qualification_key
 from audiorecorder.readiness import CredentialProbe, microphone_permission
+from audiorecorder.slides.selector import RANGES as SLIDE_RANGES
+from audiorecorder.slides.selector import SlideTuning
 from audiorecorder.ui import icons, theme
 
 COPIED_SECONDS = 1.5
+# Slide tuning fields: label, unit, decimals, step, tooltip.
+SLIDE_FIELDS = {
+    "sample_seconds": (
+        "Sample every", " s", 0, 1.0,
+        "How often the meeting window is grabbed and compared. A slide has to stay for two "
+        "samples to be kept, so with 5 s a slide shown for less than about 10 s can be "
+        "missed. A shorter interval catches short slides and costs a little more CPU."),
+    "new_content_percent": (
+        "New slide when changed", " %", 1, 0.5,
+        "Keep a new snapshot when at least this share of the still part of the window "
+        "differs from each snapshot kept so far. Each one is compared on its own, not with "
+        "an average, so many kept slides do not stop new ones: a sample is skipped only "
+        "when it nearly matches one kept slide, for example when the presenter goes back. "
+        "Lower it to keep text typed into a shared chart or document; very low values "
+        "also keep small changes such as a notification. The window is divided into "
+        "48 x 27 = 1296 cells, so 1 % is about 13 cells."),
+    "settle_percent": (
+        "Settled when changing under", " %", 1, 0.5,
+        "A sample counts only when less than this share of the window changed since the "
+        "previous sample, so a slide in transition or an animation is skipped."),
+    "changed_level": (
+        "Cell change level", " levels", 0, 1.0,
+        "How much the brightness of a cell (1/48 x 1/27 of the window, 0 to 255 levels) "
+        "must change to count as changed. Lower is more sensitive."),
+    "content_area_percent": (
+        "Content when detail covers", " %", 0, 1.0,
+        "A view counts as a slide or shared screen when still, detailed cells cover this "
+        "share of the window; otherwise it counts as a view of the people."),
+    "new_people_percent": (
+        "New people view when changed", " %", 0, 1.0,
+        "Keep another view of the people when this share of its layout changed, for "
+        "example when somebody joins or leaves."),
+}
 
 
 # Wide enough for the readiness lines to wrap once at most.
@@ -81,6 +119,8 @@ class SettingsDialog(QDialog):
         outer.addWidget(self._tabs)
         general_page = self._page("General")
         readiness_page = self._page("Readiness")
+        slides_page = self._page("Slides")
+        self._build_slides_page(slides_page[1])
         layout = general_page[1]
 
         # --- General ---
@@ -397,9 +437,60 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)
         outer.addLayout(btn_row)
-        self._pages = (general_page, readiness_page)
+        self._pages = (general_page, readiness_page, slides_page)
         self._buttons = btn_row
         self._fit_to_contents(self._pages, self._buttons)
+
+    def _build_slides_page(self, layout):
+        group = QGroupBox("Slide snapshots")
+        form = QFormLayout(group)
+        note = QLabel(
+            "These values decide when Slides keeps a snapshot of the meeting window. "
+            "OK applies them at once, also to a recording that is running.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        tuning = SlideTuning.from_config(self.config.get("slide_tuning"))
+        self._slide_spins = {}
+        for name, (label, unit, decimals, step, tip) in SLIDE_FIELDS.items():
+            spin = QDoubleSpinBox()
+            spin.setRange(*SLIDE_RANGES[name])
+            spin.setDecimals(decimals)
+            spin.setSingleStep(step)
+            spin.setSuffix(unit)
+            spin.setValue(getattr(tuning, name))
+            self._slide_spins[name] = spin
+            form.addRow(self._explained(label, tip), spin)
+        defaults = QPushButton("Restore defaults")
+        defaults.clicked.connect(self._restore_slide_defaults)
+        form.addRow("", defaults)
+        layout.addWidget(group)
+        layout.addStretch()
+
+    def _explained(self, label, explanation):
+        """A form label with an (i) button that shows the explanation on hover or click."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(4)
+        row_layout.addWidget(QLabel(label))
+        info = QToolButton()
+        info.setAutoRaise(True)
+        info.setCursor(Qt.CursorShape.WhatsThisCursor)
+        info.setIcon(icons.icon("info", theme.solid("text.secondary"), 14))
+        info.setIconSize(QSize(14, 14))
+        info.setAccessibleName(f"About {label}")
+        # Rich text, so Qt wraps the tooltip instead of drawing one very long line.
+        text = f"<p>{html.escape(explanation)}</p>"
+        info.setToolTip(text)
+        info.clicked.connect(
+            lambda: QToolTip.showText(info.mapToGlobal(info.rect().bottomLeft()), text, info))
+        row_layout.addWidget(info)
+        row_layout.addStretch()
+        return row
+
+    def _restore_slide_defaults(self):
+        for name, value in SlideTuning().to_config().items():
+            self._slide_spins[name].setValue(value)
 
     def _fit_to_contents(self, pages, buttons):
         """Open large enough to show every tab; scroll only on a screen too small for it."""
@@ -577,6 +668,8 @@ class SettingsDialog(QDialog):
         self.config["mic_source_name"] = self._mic_combo.currentData()
         self.config["system_volume"] = self._system_vol.value() / 100.0
         self.config["mic_volume"] = self._mic_vol.value() / 100.0
+        self.config["slide_tuning"] = {
+            name: spin.value() for name, spin in self._slide_spins.items()}
 
         entered_key = self._api_key_edit.text().strip()
         if entered_key:

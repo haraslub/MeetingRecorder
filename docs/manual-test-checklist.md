@@ -73,6 +73,31 @@ and say in the release notes what was not exercised.
       stopped, and the recording carries on to a complete `.m4a` either way
 - [ ] Transcribe and summarize a recording made with subtitles on: both behave as before
 - [ ] Delete a recording that has a transcript, a summary and subtitles: all four files go
+- [ ] Switch Slides on, start a recording and join a Google Meet call in a normal (not full
+      screen) Chrome window. Record about 2 minutes: first only cameras, then a participant
+      shares 4 slides for about 15 seconds each, then stops sharing. The card says
+      `Slides: watching the meeting, N saved` and counts; the row gets a Slides badge that
+      opens the recording's folder; the folder holds 1 people snapshot from the start, 4 slide
+      snapshots and 1 people snapshot after the share, and `slides.md` lists their times; the
+      M4A plays without gaps and its length matches the wall-clock time
+- [ ] During the share, cover the Chrome window with another window: new slides are still
+      saved, and no snapshot shows the covering window
+- [ ] Minimize the Meet window, or switch its window to another tab: the card says
+      `Slides: waiting for a Meet or Teams window`
+- [ ] The same call in Teams web (Edge or Chrome) keeps the shared slides
+- [ ] Switch Slides off during a recording: the card says the saved snapshots are kept, and
+      they are in the recording's folder after stop
+- [ ] During a recording with Slides, share a chart and type into it: with the default 4 % no
+      new snapshot appears; set **Settings → Slides → New slide when changed** to 0.5 % and
+      press OK without stopping the recording: within about 15 seconds of typing a few
+      words, a new snapshot is kept
+- [ ] Record a Teams web call: the new folder is named `<start time> - <meeting subject>` and
+      holds the M4A; after Transcribe and Clean up with AI it also holds the `.md` and
+      `.summary.md` with the same name
+- [ ] Start with older recordings directly in the output folder: each moves into its own folder,
+      `Recording 2026-11-04 10-00-00 1a2b3c4d` becomes `2026-11-04 10-00-00`
+- [ ] **⋯ → Open folder** opens the recording's folder; **Copy folder name** puts its name on
+      the clipboard; **Move to folder…** moves the whole folder
 - [ ] Clear the API key from the keyring, restart, and confirm Transcribe explains what to do
       rather than failing obscurely
 - [ ] Enter the key in Settings, confirm it is accepted and survives a restart
@@ -87,6 +112,9 @@ and say in the release notes what was not exercised.
 - [ ] Close the window during a recording: it asks first; No keeps recording, Yes saves and exits
 - [ ] Sign out of Windows during a recording, sign in and start the app: the status bar says it
       recovered an interrupted recording, and the new `.m4a` plays back
+- [ ] Start a recording with Slides on during a Meet call where 2 slides are shared, end the
+      process from Task Manager, start the app again: the status bar reports a recovered recording, and its row
+      shows the Slides badge with 2 snapshots in the folder
 - [ ] Start the app in two Windows accounts at once (fast user switching or Remote Desktop):
       both run; a second start in the same account only brings its window forward
 - [ ] Set the output directory to a FAT32 or exFAT USB stick: a recording and its transcript

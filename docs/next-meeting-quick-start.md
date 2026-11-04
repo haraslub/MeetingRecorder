@@ -74,8 +74,8 @@
 1. When remote labels appear, choose **Name speakers** and map them to participant names.
    Names assigned late are still applied to the complete saved speaker transcript.
 2. Stop recording at the end. Wait for **Saved** in the status bar before quitting.
-3. The output folder contains the `.m4a` plus `.speakers.md` and `.speakers.json` when live
-   speakers recognized speech. RTS translation adds `.live.md`.
+3. The recording's folder in the output folder contains the `.m4a` plus `.speakers.md` and
+   `.speakers.json` when live speakers recognized speech. RTS translation adds `.live.md`.
 4. Choose **Transcribe** for the full Soniox batch transcript. The live speaker sidecars are
    immediate aids; batch diarization remains the more accurate transcript of record.
 

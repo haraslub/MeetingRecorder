@@ -10,7 +10,8 @@ A desktop application that records a call from both sides at once: what comes ou
 speakers and what goes into your microphone, mixed into one file. Afterwards it sends the
 recording to [Soniox](https://soniox.com) for a transcript with speaker labels and timestamps,
 and can hand that transcript to the Claude CLI for a summary. During a call it can show live
-translated subtitles or a live transcript labelled by speaker, and between calls it does
+translated subtitles or a live transcript labelled by speaker, and on Windows it can keep a
+snapshot of each slide or shared screen in a Meet or Teams web call. Between calls it does
 push-to-talk dictation into any application.
 
 Written for Google Meet, Teams and Zoom calls in Czech and English. It runs on Windows, macOS
@@ -52,10 +53,19 @@ crash or a log-off left behind is encoded at the next start.
 
 ### Keeps a library of your recordings
 
-There is no database. Every `.m4a` in the output folder is a recording, newest first. Each row
-shows the name, the duration, the date, a status chip and icons for the files that exist
-beside the recording: transcript, AI summary, live subtitles and speaker transcript. Click an
-icon to open that file.
+There is no database. Each recording has its own folder in the output folder, named by its
+start time and the meeting subject when the recorder saw one, for example
+`2026-11-04 10-00-00 - Weekly sync`. The folder holds the `.m4a` and everything made from it,
+with the same name: the transcript, the AI summary, live subtitles, the speaker transcript and
+the slide snapshots. The list shows the recordings newest first. Each row shows the name, the
+duration, the date, a status chip and icons for the files that exist: transcript, AI summary,
+live subtitles, speaker transcript and slides. Click an icon to open that file; the Slides icon
+opens the folder.
+
+The subject comes from the title of the meeting window: Teams web shows it, a Meet tab shows only
+the meeting code, so a Meet call gets a time-only name unless the meeting prompt named it.
+Recordings saved by an older version directly in the output folder move into their own folder
+at the next start.
 
 Each row offers one action for its state:
 
@@ -67,8 +77,10 @@ Each row offers one action for its state:
 | Done | Transcribed | **Open** the transcript |
 | Failed | Failed, with **See details** | **Retry** |
 
-The **⋯** menu holds **Clean up with AI…**, **Move to folder…** and **Delete…**. Delete asks
-first and removes the recording with all its side files; Move carries them along.
+The **⋯** menu holds **Clean up with AI…**, **Open folder**, **Copy folder name**,
+**Move to folder…** and **Delete…**. Copy folder name puts the folder name on the clipboard.
+Move moves the whole folder. Delete asks first, removes the recording with all its side files
+and slides, and removes the folder when nothing else is in it.
 A recording that is queued or being processed cannot be moved or deleted until its job ends.
 **Add** (the file icon in the header) copies existing audio files (m4a, mp3, wav, ogg, flac,
 wma, aac) into the library.
@@ -118,6 +130,35 @@ saved, the call is written as `.speakers.md` and structured `.speakers.json`. Li
 an aid during the call; the batch transcription afterwards is more accurate.
 
 ![Live speaker labels](docs/screenshots/live-speakers.png)
+
+### Keeps the slides
+
+Switch on **Slides** to keep what was shown during a Google Meet or Teams call in Chrome, Brave
+or Edge. Every 5 seconds of a recording the app looks at the browser window whose active tab is
+the meeting, also when another window covers it, and sorts what it sees:
+
+- **Slides or a shared screen**: kept whenever the picture is new and has settled. A slide
+  shown again is not kept twice, and moving camera tiles beside the slide are left out of the
+  comparison. Content has to stay for about 5 to 10 seconds to be kept.
+- **Only people** (camera tiles or avatars): one snapshot when such a phase starts, and another
+  only when the people change, for example when somebody joins.
+
+The meeting window does not have to be full screen, but it must not be minimized, and the
+meeting has to be the tab that is shown in its window. The recorder card shows the state under
+the recording line: waiting for a Meet or Teams window, watching the meeting with the number
+saved, or stopped with the reason. Whatever happens to slide capture, the audio recording goes
+on.
+
+After the M4A is saved, the snapshots sit in the recording's folder: JPEG files named by order
+and time in the recording, and a `slides.md` that lists them with their times. The Slides icon
+on the row opens the folder. Snapshots of an interrupted recording are recovered with its audio
+at the next start.
+
+Switching Slides on during a recording starts capture at once; switching it off stops it and
+keeps what was saved. Slides uses no paid service, so its button turns blue instead of violet
+and the cost strip ignores it. It is off by default. It works on Windows only for now; on macOS
+and Linux the button is disabled. See
+[slide snapshots architecture](docs/architecture/slide-snapshots.md).
 
 ### Shows what costs money
 
@@ -193,7 +234,7 @@ you see on Windows and Linux; macOS adds the options shown further down.
 
 | Group | Setting | What it does |
 |---|---|---|
-| General | **Output folder** | Where recordings, transcripts and side files are saved. Default `~/AudioRecordings` |
+| General | **Output folder** | Where recordings, transcripts and side files are saved. Default `~/MeetingRecorder`; an unchanged `~/AudioRecordings` of an older version is renamed to it at start |
 | Meeting detection | **Show a recording prompt when a meeting is detected** | Turns on browser, native and calendar detection. Off by default |
 | | **Browser agent** | Shows the connected browser profiles and their enabled meeting tools, or why it is not connected |
 | | **Download**, **Extension folder** | The Browser Agent download page and, once installed, the local extension folder to load in the browser. Each has a copy button |
@@ -221,6 +262,20 @@ On macOS, Settings adds automation, login and native call detection:
 | Native meeting detection | **Inspect native Teams/Zoom call controls** | Reads call-control names through Accessibility, not chat text or participants |
 | | Supervised test, diagnostics export, version approval | The steps that qualify one app version for automatic start and stop |
 
+The **Slides** tab sets when Slides keeps a snapshot. The **(i)** button beside each value
+explains it on hover or click. **OK** applies the values at once, also to a recording that is
+running. **Restore defaults** sets them back. A new sample is compared with each kept snapshot
+on its own, not with an average of them, so many kept slides do not stop new ones.
+
+| Setting | Default | What it does |
+|---|---|---|
+| **Sample every** | 5 s | How often the meeting window is grabbed and compared, 1 to 60 seconds |
+| **New slide when changed** | 4 % | Share of the still part of the window that must differ from every kept snapshot. Lower it, for example to 0.5 %, to keep text typed into a shared chart or document |
+| **Settled when changing under** | 2 % | A sample counts only when less than this share changed since the previous one |
+| **Cell change level** | 6 levels | How much the brightness of one cell (1/48 x 1/27 of the window) must change to count |
+| **Content when detail covers** | 12 % | Detailed still area that makes a view a slide or shared screen instead of a people view |
+| **New people view when changed** | 15 % | Layout change that keeps another view of the people |
+
 The **Readiness** tab checks what recording and detection need on this computer: notification
 and microphone access, the Soniox credential, the last capture test and the native call-control
 state. **Test Audio (3 seconds)** makes a short test recording; unattended automatic capture
@@ -229,8 +284,8 @@ needs one that passed for the current devices.
 ![Settings, Readiness tab](docs/screenshots/settings-readiness.png)
 
 Not in the dialog, only in the configuration file: `summary_prompt`, the instruction given to
-the Claude CLI for **Clean up with AI**. The Translate and Speakers buttons remember their
-last state; Dictation starts off.
+the Claude CLI for **Clean up with AI**. The Translate, Speakers and Slides buttons remember
+their last state; Dictation starts off.
 
 ## What works where
 
@@ -245,6 +300,7 @@ please report what you find.
 | Transcription and summaries | yes | yes | yes |
 | Live subtitles (Translate) | yes | yes on macOS 13+ | only with a monitor source |
 | Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
+| Slide snapshots (Slides) | Meet and Teams web in Chrome, Brave, Edge | no | no |
 | Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
 | Automatic start and stop | no | qualified Teams and Zoom versions | no |
 | Browser meeting popup | Browser Agent (Brave/Chrome) | Browser Agent (Brave/Chrome) | not supported |
@@ -283,9 +339,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.5.1-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.5.1-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.5.1-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.6.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.6.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.6.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
@@ -385,8 +441,8 @@ bodies are not printed because they may contain sensitive data.
 
 ## Your data stays on your machine
 
-Recordings, transcripts and summaries are files in the output folder you choose, and nothing
-scans, syncs or uploads them on its own.
+Recordings, transcripts, summaries and slide snapshots are files in the output folder you
+choose, and nothing scans, syncs or uploads them on its own.
 
 Audio leaves your computer only when you ask for it: **Transcribe** uploads that one recording
 to Soniox, dictation streams your microphone to Soniox while you hold the key, **Translate**
@@ -399,6 +455,11 @@ content. **Clean up with AI** runs the Claude CLI on your machine, which sends t
 to Anthropic under whatever agreement your Claude account has. Read the privacy terms of both
 services and decide whether the calls you record belong there. There is no telemetry and no
 account of our own.
+
+**Slides** snapshots never leave your computer: no function uploads them, transcription
+included. A snapshot shows the whole meeting window, including the browser's tabs and address
+bar, but never another window. To find the meeting, the app reads the titles of Chrome, Brave
+and Edge windows on this computer; it reads no other window's title or contents.
 
 The Soniox key is held by the operating system keyring: Credential Manager on Windows, Keychain
 on macOS, Secret Service on Linux. Settings live in your user configuration directory
@@ -447,8 +508,9 @@ Linux also needs the Qt and PortAudio system libraries; the list CI installs is 
 `.github/workflows/ci.yml`. The AppImage step needs `appimagetool` on PATH.
 
 The tests cover the parts that need no hardware: the transcript format, mixing maths, device
-selection, native PCM conversion, settings, the recording scanner, push-to-talk logic and the
-window's state handling. macOS CI also builds and starts the frozen runtime in smoke-test mode.
+selection, native PCM conversion, settings, the recording scanner, push-to-talk logic, slide
+selection, the meeting window rules and the window's state handling. macOS CI also builds
+and starts the frozen runtime in smoke-test mode.
 Real capture still needs a machine, and `docs/manual-test-checklist.md` lists what to try before
 a release. The look of the interface is described in
 [the UI design system](docs/architecture/ui-design-system.md).

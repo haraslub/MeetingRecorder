@@ -116,6 +116,7 @@ class WasapiBackend(CaptureBackend):
 
         record_system = system_source != SYSTEM_SOURCE_NONE
         stamp = uuid.uuid4().hex
+        self.capture_stamp = stamp
         rate = None
 
         if record_system:

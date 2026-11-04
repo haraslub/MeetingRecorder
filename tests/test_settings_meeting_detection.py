@@ -179,3 +179,27 @@ def test_the_dialog_opens_without_scrolling_when_the_screen_allows(app, monkeypa
     finally:
         built.hide()
         built.deleteLater()
+
+
+def test_slide_tuning_is_shown_saved_and_restored(dialog):
+    from audiorecorder.slides.selector import SlideTuning
+
+    spins = dialog._slide_spins
+    assert spins["new_content_percent"].value() == SlideTuning().new_content_percent
+    spins["new_content_percent"].setValue(0.5)
+    spins["sample_seconds"].setValue(10)
+    dialog._save_and_close()
+    saved = dialog.get_config()["slide_tuning"]
+    assert SlideTuning.from_config(saved) == SlideTuning(new_content_percent=0.5, sample_seconds=10)
+    dialog._restore_slide_defaults()
+    assert spins["new_content_percent"].value() == SlideTuning().new_content_percent
+
+
+def test_each_slide_value_has_an_info_button_with_its_explanation(dialog):
+    from PyQt6.QtWidgets import QToolButton
+
+    page = dialog._tabs.widget(2)
+    infos = [b for b in page.findChildren(QToolButton) if b.accessibleName().startswith("About")]
+    assert len(infos) == len(dialog._slide_spins)
+    assert all("<p>" in info.toolTip() for info in infos)
+    assert "not with an average" in infos[1].toolTip()

@@ -1,5 +1,3 @@
-import re
-
 import pytest
 
 from audiorecorder.recordings.manager import RecordingManager
@@ -13,6 +11,15 @@ def make_recording(directory, stem, transcript=False, summary=False):
         (directory / f"{stem}.md").write_text("# Transcript", encoding="utf-8")
     if summary:
         (directory / f"{stem}.summary.md").write_text("# Summary", encoding="utf-8")
+
+
+def make_slides(directory, stem):
+    folder = directory / f"{stem}.slides"
+    folder.mkdir()
+    (folder / "0001 00-00-04.jpg").write_bytes(b"jpeg one")
+    (folder / "0002 00-01-10.jpg").write_bytes(b"jpeg two")
+    (folder / "index.md").write_text("# Slides", encoding="utf-8")
+    return folder
 
 
 class TestScan:
@@ -42,15 +49,17 @@ class TestScan:
         (tmp_path / "song.mp3").write_bytes(b"x")
         assert [r.name for r in RecordingManager(str(tmp_path)).scan()] == ["audio"]
 
+    def test_slides_folder_is_an_output(self, tmp_path):
+        make_recording(tmp_path, "with")
+        make_slides(tmp_path, "with")
+        make_recording(tmp_path, "without")
+        by_name = {r.name: r for r in RecordingManager(str(tmp_path)).scan()}
+        assert ".slides" in by_name["with"].outputs
+        assert ".slides" not in by_name["without"].outputs
+
     def test_unreadable_container_reports_zero_duration_instead_of_raising(self, tmp_path):
         make_recording(tmp_path, "broken")
         assert RecordingManager(str(tmp_path)).scan()[0].duration_seconds == 0.0
-
-
-class TestGenerateFilename:
-    def test_shape(self, tmp_path):
-        name = RecordingManager(str(tmp_path)).generate_filename()
-        assert re.fullmatch(r"Recording \d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2} [a-f0-9]{8}\.m4a", name)
 
 
 class TestDelete:
@@ -65,6 +74,14 @@ class TestDelete:
 
     def test_missing_file_is_not_an_error(self, tmp_path):
         RecordingManager(str(tmp_path)).delete(str(tmp_path / "never.m4a"))
+
+    def test_removes_the_slides_folder_with_its_files(self, tmp_path):
+        make_recording(tmp_path, "gone", transcript=True)
+        make_slides(tmp_path, "gone")
+
+        RecordingManager(str(tmp_path)).delete(str(tmp_path / "gone.m4a"))
+
+        assert not [p for p in tmp_path.iterdir() if p.suffix != ".lock"]
 
 
 class TestRename:
@@ -219,3 +236,30 @@ def test_delete_and_rename_leave_no_lock_files(tmp_path):
     manager.delete(str(tmp_path / "gone.m4a"))
 
     assert sorted(p.name for p in tmp_path.iterdir()) == ["renamed.m4a", "renamed.md"]
+
+
+def test_move_takes_the_slides_folder_along(tmp_path):
+    make_recording(tmp_path, "meeting", transcript=True)
+    make_slides(tmp_path, "meeting")
+    destination = tmp_path / "destination"
+    destination.mkdir()
+
+    RecordingManager(str(tmp_path)).move(str(tmp_path / "meeting.m4a"), str(destination))
+
+    assert not (tmp_path / "meeting.slides").exists()
+    assert sorted(p.name for p in (destination / "meeting.slides").iterdir()) == [
+        "0001 00-00-04.jpg", "0002 00-01-10.jpg", "index.md"]
+
+
+def test_move_refuses_an_existing_slides_folder_in_the_destination(tmp_path):
+    make_recording(tmp_path, "meeting")
+    make_slides(tmp_path, "meeting")
+    destination = tmp_path / "destination"
+    destination.mkdir()
+    make_slides(destination, "meeting")
+
+    with pytest.raises(FileExistsError):
+        RecordingManager(str(tmp_path)).move(str(tmp_path / "meeting.m4a"), str(destination))
+
+    assert (tmp_path / "meeting.m4a").exists()
+    assert (tmp_path / "meeting.slides" / "index.md").exists()

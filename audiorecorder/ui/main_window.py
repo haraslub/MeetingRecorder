@@ -4,9 +4,10 @@ import shutil
 import sys
 import time
 from collections import deque
+from datetime import datetime
 
 from PyQt6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt6.QtGui import QBrush, QDesktopServices, QPainter
+from PyQt6.QtGui import QBrush, QDesktopServices, QGuiApplication, QPainter
 from PyQt6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -41,7 +42,16 @@ from audiorecorder.meetings.detection import (
     create_meeting_detector,
 )
 from audiorecorder.readiness import capture_readiness
-from audiorecorder.recordings.manager import RecordingManager
+from audiorecorder.recordings.manager import (
+    RecordingManager,
+    new_recording_path,
+    remove_empty_folder,
+)
+from audiorecorder.recordings.naming import meeting_title
+from audiorecorder.slides.capture import SlideCapture
+from audiorecorder.slides.selector import SlideTuning
+from audiorecorder.slides.store import SlideFolder, finalize_folder
+from audiorecorder.slides.windows_screen import create_slide_source
 from audiorecorder.subtitles.document import write_live_transcript
 from audiorecorder.subtitles.engine import SubtitleEngine
 from audiorecorder.subtitles.speaker_document import (
@@ -224,6 +234,7 @@ class MainWindow(QMainWindow):
     _mic_level_signal = pyqtSignal(float)
     _capture_error_signal = pyqtSignal(str, str)
     _browser_updated = pyqtSignal()
+    _slide_status = pyqtSignal(str, int, str)
 
     def __init__(self, config, notifications=None):
         super().__init__()
@@ -231,6 +242,8 @@ class MainWindow(QMainWindow):
         self._capture = None
         self._recording_start_time = None
         self._is_recording = False
+        # The subject of the meeting being recorded, which names its folder.
+        self._meeting_title = ""
 
         self._manager = RecordingManager(config["output_dir"])
         self._active_encoders = []
@@ -255,6 +268,9 @@ class MainWindow(QMainWindow):
         self._observed_remote_speakers = set()
         self._speaker_segments = []
         self._pending_sidecars = {}
+        self._slide_source, self._slide_unavailable = create_slide_source()
+        self._slide_folder = None
+        self._slides = None
         self._quitting = False
         self._exit_ready = False
         self._session_ending = False
@@ -286,6 +302,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(600, 650)
         self.resize(720, 800)
         self._build_ui()
+        self._slide_status.connect(self._on_slide_status, Qt.ConnectionType.QueuedConnection)
         self._lifecycle = LifecycleAdapter(self, notifications)
         self._capture_session = CaptureSession()
         self._capture_session.started.connect(self._capture_started)
@@ -294,6 +311,7 @@ class MainWindow(QMainWindow):
         self._capture_session.system_level.connect(self._level_bars.set_system_level)
         self._capture_session.mic_level.connect(self._level_bars.set_mic_level)
         self._create_tray_icon()
+        self._migrate_recordings()
         self._refresh_list()
         self._recover_orphaned_captures()
 
@@ -303,6 +321,9 @@ class MainWindow(QMainWindow):
         self._meeting_timer = QTimer(self)
         self._meeting_timer.setInterval(5000)
         self._meeting_timer.timeout.connect(self._poll_for_meeting)
+        self._title_timer = QTimer(self)
+        self._title_timer.setInterval(5000)
+        self._title_timer.timeout.connect(self._sample_meeting_title)
         self._sync_meeting_detection()
 
     def _create_tray_icon(self):
@@ -436,9 +457,9 @@ class MainWindow(QMainWindow):
         brand = QHBoxLayout()
         brand.setSpacing(8)
         brand.addWidget(AppMark())
-        title = QLabel("Meeting Recorder")
-        title.setObjectName("appTitle")
-        brand.addWidget(title)
+        self._app_title = QLabel("Meeting Recorder")
+        self._app_title.setObjectName("appTitle")
+        brand.addWidget(self._app_title)
         header_row.addLayout(brand)
         header_row.addStretch()
 
@@ -465,7 +486,20 @@ class MainWindow(QMainWindow):
             "Remote 2, etc. Adds up to two Soniox realtime sessions while recording.")
         self._btn_live_speakers.setChecked(bool(self.config.get("live_speakers")))
         self._btn_live_speakers.clicked.connect(self._toggle_live_speakers)
-        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers):
+        self._btn_slides = self._live_toggle(
+            "Slides", "presentation",
+            "Every 5 seconds of a recording, look at the Google Meet or Teams window in "
+            "Chrome, Brave or Edge and keep each new slide or shared screen, plus one view "
+            "of the people when they change. Snapshots stay on this computer.")
+        self._btn_slides.setProperty("toggle", "local")
+        if self._slide_source is None:
+            self._btn_slides.setEnabled(False)
+            self._btn_slides.setToolTip(self._slide_unavailable)
+        else:
+            self._btn_slides.setChecked(bool(self.config.get("slide_snapshots")))
+        self._btn_slides.clicked.connect(self._toggle_slides)
+        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers,
+                       self._btn_slides):
             toggles.addWidget(button)
             button.toggled.connect(lambda _on: self._render_header_icons())
         header_row.addLayout(toggles)
@@ -483,6 +517,7 @@ class MainWindow(QMainWindow):
         tools.addWidget(self._btn_settings)
         header_row.addLayout(tools)
         layout.addWidget(header)
+        self._header = header
 
         # --- What costs money right now ---
         self._cost_strip = CostStrip()
@@ -523,6 +558,8 @@ class MainWindow(QMainWindow):
         self._recording_list.move_requested.connect(self._move_recording)
         self._recording_list.delete_requested.connect(self._delete_recording)
         self._recording_list.open_transcript_requested.connect(self._open_transcript)
+        self._recording_list.open_folder_requested.connect(self._open_folder)
+        self._recording_list.copy_folder_name_requested.connect(self._copy_folder_name)
         self._recording_list.details_requested.connect(self._show_processing_failure)
         self._recording_list.add_requested.connect(self._add_files)
         self._library_holder = QWidget()
@@ -567,6 +604,24 @@ class MainWindow(QMainWindow):
         self._update_live_view_visibility()
         self._update_cost_strip()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_header()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # A resize before the first show measures the header before it is styled.
+        self._fit_header()
+
+    def _fit_header(self):
+        # Four toggles with their labels do not fit beside the title in a narrow side
+        # window; the mark alone still names the app there.
+        title = self._app_title
+        needed = self._header.sizeHint().width()
+        if not title.isVisible():
+            needed += title.sizeHint().width() + 8
+        title.setVisible(self.width() >= needed)
+
     def _live_toggle(self, text, icon, tooltip):
         button = QPushButton(spaced(text))
         button.setProperty("toggle", "live")
@@ -588,7 +643,8 @@ class MainWindow(QMainWindow):
         return button
 
     def _render_header_icons(self):
-        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers):
+        for button in (self._btn_dictation, self._btn_rts, self._btn_live_speakers,
+                       self._btn_slides):
             tint = "text.onFill" if button.isChecked() else (
                 "text.secondary" if button.isEnabled() else "text.disabled")
             button.setIcon(icons.icon(button.property("glyph"), theme.solid(tint), 16))
@@ -726,6 +782,9 @@ class MainWindow(QMainWindow):
         self._is_recording = True
         self._recording_start_time = time.time()
         self._timer.start(200)
+        self._meeting_title = ""
+        self._sample_meeting_title()
+        self._title_timer.start()
 
         if system_name is None:
             self._status_bar.showMessage(
@@ -744,6 +803,12 @@ class MainWindow(QMainWindow):
             self._speaker_segments = []
             self._subtitles.set_speaker_mapping_available(0)
             self._start_speaker_recognition(system_name)
+        if self._slide_source is not None and self._capture.capture_stamp is not None:
+            self._slide_folder = SlideFolder(
+                self._recording_config[result.recording]["output_dir"],
+                self._capture.capture_stamp)
+            if self._btn_slides.isChecked():
+                self._start_slides()
         self._update_cost_strip()
         self._update_live_view_visibility()
         self._last_capture_test = {
@@ -822,7 +887,10 @@ class MainWindow(QMainWindow):
         system_path, mic_path = result.paths
         self._capture = None
         controller.stopped(result.recording, has_audio=bool(mic_path))
+        self._sample_meeting_title()
+        self._title_timer.stop()
         self._stop_speaker_recognition()
+        slides = self._finish_slides()
 
         self._is_recording = False
         self._timer.stop()
@@ -832,12 +900,14 @@ class MainWindow(QMainWindow):
         self._update_live_view_visibility()
         # system_path is None on a microphone-only recording, which the encoder handles.
         if mic_path:
-            output_name = self._manager.generate_filename()
             capture_config = self._recording_config.pop(result.recording)
-            output_path = os.path.join(capture_config["output_dir"], output_name)
+            output_path = new_recording_path(
+                capture_config["output_dir"],
+                datetime.fromtimestamp(self._recording_start_time), self._meeting_title)
             pending = {
                 "subtitles": self._finish_subtitles(),
                 "speakers": self._speaker_sidecar_payload(),
+                "slides": slides.path if slides is not None else None,
             }
             if any(pending.values()):
                 self._pending_sidecars[output_path] = pending
@@ -853,6 +923,8 @@ class MainWindow(QMainWindow):
             self._start_next_encoder()
         else:
             self._finish_subtitles()
+            if slides is not None:
+                slides.discard()
             self._status_bar.showMessage("Recording cancelled (no audio)")
             self._recording_config.pop(result.recording, None)
         self._lifecycle.process()
@@ -897,22 +969,28 @@ class MainWindow(QMainWindow):
 
     def _recover_orphaned_captures(self):
         """Encode capture files that a logged-off or crashed session left behind."""
-        for system_path, mic_path, last_write in self._manager.orphaned_captures():
-            output_path = os.path.join(
-                self.config["output_dir"], self._manager.generate_filename(last_write))
+        for system_path, mic_path, slides_path, started in self._manager.orphaned_captures():
+            output_path = new_recording_path(self.config["output_dir"], started)
+            if slides_path is not None:
+                self._pending_sidecars[output_path] = {"slides": slides_path}
             self._enqueue_encoder(
                 system_path, mic_path, output_path, self.config,
                 self._on_recovery_finished,
-                lambda error, s=system_path, m=mic_path: self._on_recovery_error(error, s, m),
+                lambda error, s=system_path, m=mic_path, o=output_path:
+                    self._on_recovery_error(error, s, m, o),
             )
         self._start_next_encoder()
 
     def _on_recovery_finished(self, path):
+        self._write_pending_sidecars(path)
         self._status_bar.showMessage(
             f"Recovered an interrupted recording: {os.path.basename(path)}", 8000)
         self._refresh_list()
 
-    def _on_recovery_error(self, error, system_path, mic_path):
+    def _on_recovery_error(self, error, system_path, mic_path, output_path):
+        # Slide snapshots stay under their temporary name beside the retained audio.
+        self._pending_sidecars.pop(output_path, None)
+        remove_empty_folder(output_path)
         kept = self._manager.set_aside_capture(system_path, mic_path)
         self._status_bar.showMessage("An interrupted recording could not be recovered")
         self._show_recording_error(
@@ -987,6 +1065,7 @@ class MainWindow(QMainWindow):
         self._lifecycle.controller.finalized(recording)
         self._partial_recordings.discard(recording)
         # Keep same-run transcript payloads with the recoverable source files.
+        remove_empty_folder(path)
         detail = f"{error}\nRetained audio: {worker.system_path}, {worker.mic_path}"
         self._lifecycle.notify("error", "Recording was not saved", body=detail)
         self._status_bar.showMessage("Encoding failed; source audio retained")
@@ -1040,6 +1119,30 @@ class MainWindow(QMainWindow):
             s = int(elapsed % 60)
             self._timer_label.setText(f"{h:02d}:{m:02d}:{s:02d}")
 
+    def _migrate_recordings(self):
+        """Give each recording saved before recordings had folders its own folder."""
+        failed = self._manager.migrate()
+        if failed:
+            self._status_bar.showMessage(
+                f"{len(failed)} older recording(s) could not move into a folder; "
+                "they stay where they are", 10000)
+
+    def _sample_meeting_title(self):
+        """Remember the first meeting subject seen while recording, for the folder name."""
+        if self._meeting_title:
+            return
+        titles = [candidate.title for candidate in self._lifecycle.candidates.values()]
+        if self._slide_source is not None:
+            try:
+                titles.append(self._slide_source.meeting_title())
+            except OSError:
+                log.exception("the meeting window title could not be read")
+        for raw in titles:
+            title = meeting_title(raw)
+            if title:
+                self._meeting_title = title
+                return
+
     def _refresh_list(self):
         self._manager = RecordingManager(self.config["output_dir"])
         recordings = self._manager.scan()
@@ -1062,6 +1165,17 @@ class MainWindow(QMainWindow):
 
     def _open_transcript(self, path):
         QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def _open_folder(self, folder):
+        if not os.path.isdir(folder):
+            self._status_bar.showMessage("Recording was moved or deleted", 5000)
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
+    def _copy_folder_name(self, folder):
+        name = os.path.basename(folder)
+        QGuiApplication.clipboard().setText(name)
+        self._status_bar.showMessage(f"Copied: {name}", 3000)
 
     def _move_recording(self, path):
         if path in self._busy_paths:
@@ -1103,7 +1217,8 @@ class MainWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "Delete Recording",
-            f"Delete '{name}' and its transcript?",
+            f"Delete '{name}' with its transcript, other side files and slides? "
+            "Its folder is removed too when nothing else is in it.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
@@ -1266,6 +1381,52 @@ class MainWindow(QMainWindow):
         elif self._mic_speaker_engine is not None or self._remote_speaker_engine is not None:
             self._stop_speaker_recognition()
             self._status_bar.showMessage("Live speaker recognition stopped", 5000)
+
+    def _toggle_slides(self):
+        wanted = self._btn_slides.isChecked()
+        self.config["slide_snapshots"] = wanted
+        save_config(self.config)
+        if wanted and self._is_recording:
+            self._start_slides()
+        elif wanted:
+            self._status_bar.showMessage("Slide snapshots start with the next recording", 5000)
+        elif self._slides is not None:
+            self._stop_slides()
+            self._state_card.set_slides("Slides: off, saved snapshots are kept")
+
+    def _start_slides(self):
+        if self._slides is not None or self._slide_folder is None:
+            return
+        self._slides = SlideCapture(
+            self._slide_source, self._slide_folder, self._recording_start_time,
+            self._slide_status.emit, SlideTuning.from_config(self.config.get("slide_tuning")))
+        self._slides.start()
+
+    def _stop_slides(self):
+        if self._slides is not None:
+            self._slides.stop()
+            self._slides = None
+
+    def _finish_slides(self):
+        """Stop slide capture of the ended recording; its folder, or None when it never ran."""
+        self._stop_slides()
+        folder, self._slide_folder = self._slide_folder, None
+        self._state_card.set_slides("")
+        return folder
+
+    def _on_slide_status(self, state, count, reason):
+        if self._slides is None:
+            return
+        saved = f", {count} saved" if count else ""
+        if state == "waiting":
+            self._state_card.set_slides(f"Slides: waiting for a Meet or Teams window{saved}")
+        elif state == "capturing":
+            self._state_card.set_slides(f"Slides: watching the meeting{saved}")
+        elif state == "stopped":
+            self._state_card.set_slides(f"Slides stopped: {reason}")
+            self._status_bar.showMessage(f"Slide capture stopped: {reason}", 8000)
+        else:
+            raise ValueError(f"unknown slide capture state: {state}")
 
     def _update_live_view_visibility(self):
         """The live panel shares the height with the library while a live function is on."""
@@ -1445,6 +1606,14 @@ class MainWindow(QMainWindow):
                     written.extend(paths)
             except OSError:
                 log.exception("the live speaker sidecars could not be written")
+        slides = pending.get("slides")
+        if slides is not None:
+            try:
+                path = finalize_folder(slides, recording_path)
+                if path is not None:
+                    written.append(path)
+            except OSError:
+                log.exception("the slide snapshots could not be placed beside the recording")
         return written
 
     def _on_subtitle_error(self, message):
@@ -1573,7 +1742,9 @@ class MainWindow(QMainWindow):
 
         added = 0
         for src in files:
-            dest = os.path.join(self.config["output_dir"], os.path.basename(src))
+            folder = os.path.join(
+                self.config["output_dir"], os.path.splitext(os.path.basename(src))[0])
+            dest = os.path.join(folder, os.path.basename(src))
             if os.path.exists(dest):
                 reply = QMessageBox.question(
                     self,
@@ -1583,6 +1754,7 @@ class MainWindow(QMainWindow):
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     continue
+            os.makedirs(folder, exist_ok=True)
             shutil.copy2(src, dest)
             added += 1
 
@@ -1601,6 +1773,8 @@ class MainWindow(QMainWindow):
         if dialog.exec():
             self.config = dialog.get_config()
             save_config(self.config)
+            if self._slides is not None:
+                self._slides.set_tuning(SlideTuning.from_config(self.config.get("slide_tuning")))
             os.makedirs(self.config["output_dir"], exist_ok=True)
             self._refresh_list()
             self._sync_meeting_detection()

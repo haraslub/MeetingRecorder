@@ -33,6 +33,7 @@ class TestLoadConfig:
         loaded = config.load_config()
         assert loaded["summary_prompt"] == config.DEFAULT_SUMMARY_PROMPT
         assert loaded["system_source_name"] is None
+        assert loaded["slide_snapshots"] is False
 
 
 class TestSaveConfig:
@@ -136,3 +137,54 @@ def test_qualification_dictionaries_are_not_shared_defaults():
     first["native_call_qualifications"]["app"] = "x"
     assert not config.validated_config({})["native_call_qualifications"]
     assert not config.DEFAULTS["native_call_qualifications"]
+
+
+def test_the_default_output_folder_is_named_after_the_product():
+    assert config.DEFAULTS["output_dir"].endswith("MeetingRecorder")
+
+
+class TestLegacyOutputFolder:
+    def settings(self, output_dir, tested=None):
+        readiness = None if tested is None else {"config": {"output_dir": str(tested)}}
+        return {"output_dir": str(output_dir), "capture_readiness": readiness}
+
+    def test_the_old_default_folder_moves_with_its_recordings(self, tmp_path):
+        legacy, current = tmp_path / "AudioRecordings", tmp_path / "MeetingRecorder"
+        (legacy / "2026-11-04 10-00-00").mkdir(parents=True)
+        cfg = self.settings(legacy, tested=legacy)
+
+        assert config.move_legacy_output_dir(cfg, legacy, current)
+
+        assert cfg["output_dir"] == str(current)
+        assert cfg["capture_readiness"]["config"]["output_dir"] == str(current)
+        assert not legacy.exists()
+        assert (current / "2026-11-04 10-00-00").is_dir()
+
+    def test_a_folder_the_user_chose_stays(self, tmp_path):
+        legacy, chosen = tmp_path / "AudioRecordings", tmp_path / "Calls"
+        legacy.mkdir()
+        cfg = self.settings(chosen)
+
+        assert not config.move_legacy_output_dir(cfg, legacy, tmp_path / "MeetingRecorder")
+
+        assert cfg["output_dir"] == str(chosen)
+        assert legacy.exists()
+
+    def test_an_existing_new_folder_is_never_merged(self, tmp_path):
+        legacy, current = tmp_path / "AudioRecordings", tmp_path / "MeetingRecorder"
+        legacy.mkdir()
+        current.mkdir()
+        cfg = self.settings(legacy)
+
+        assert not config.move_legacy_output_dir(cfg, legacy, current)
+
+        assert cfg["output_dir"] == str(legacy)
+        assert legacy.exists()
+
+    def test_a_missing_old_folder_switches_to_the_new_default(self, tmp_path):
+        legacy, current = tmp_path / "AudioRecordings", tmp_path / "MeetingRecorder"
+        cfg = self.settings(legacy)
+
+        assert config.move_legacy_output_dir(cfg, legacy, current)
+
+        assert cfg["output_dir"] == str(current)

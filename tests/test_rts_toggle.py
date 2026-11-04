@@ -66,6 +66,7 @@ class FakeCapture:
 
     active_system_source = "Speakers"
     active_mic_source = "Microphone"
+    capture_stamp = "fakestamp"
 
 
 class FakeDictation:

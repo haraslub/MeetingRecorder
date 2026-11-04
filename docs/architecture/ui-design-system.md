@@ -14,7 +14,8 @@ records how it maps onto Qt.
   style sheet. After a property change, `widgets.set_prop()` re-polishes the widget.
 - **Three colours carry meaning.** Red (`rec*`) is only for recording. Violet (`live*`) is
   only for paid Soniox realtime functions: the Dictation, Translate and Speakers toggles, the
-  cost strip and the dictation card. Blue (`accent*`) is for actions, focus and progress.
+  cost strip and the dictation card. Blue (`accent*`) is for actions, focus and progress, and
+  for the Slides toggle (`toggle="local"`), which turns on a free, local-only function.
 - **The theme follows the operating system.** `theme.apply(app)` reads
   `styleHints().colorScheme()` and follows `colorSchemeChanged`. A scheme Qt cannot read
   stays dark. Painted widgets and tinted icons read `theme.color()` / `theme.solid()` and
@@ -31,9 +32,9 @@ records how it maps onto Qt.
 
 | Part | Widget | Behaviour |
 |---|---|---|
-| Header | `QFrame#header` in `main_window.py` | Mark, title, three live toggles (`toggle="live"`, checked = violet), Add and Settings as icon buttons |
+| Header | `QFrame#header` in `main_window.py` | Mark, title, three live toggles (`toggle="live"`, checked = violet), the Slides toggle (`toggle="local"`, checked = blue), Add and Settings as icon buttons. The title hides when the window is too narrow for all four toggle labels; the mark stays |
 | Cost strip | `CostStrip` | Hidden when nothing paid is on. "Armed for next recording" while a toggle is on and nothing records. "Live, billing now" with the session count while engines run, its icon pulsing. "Dictation on" during dictation |
-| State card | `state_card.StateCard` | States `idle`, `starting`, `recording` (with `muted`), `stopping`, `failed`, `dictation`. Owns the record, mute and Details buttons, the timer and the meters |
+| State card | `state_card.StateCard` | States `idle`, `starting`, `recording` (with `muted`), `stopping`, `failed`, `dictation`. Owns the record, mute and Details buttons, the timer and the meters. While recording with Slides on, a line under the recording line shows the slide capture state (`set_slides`) |
 | Live panel | `subtitles.SubtitleView` | Shown while Translate or Speakers is on and a recording runs, or while it still holds lines. Shares a `GripSplitter` with the library; the library starts at 196 px, 118 px below a 700 px window |
 | Library | `recording_list.RecordingListWidget` | One `RecordingItemWidget` per recording in a scroll area. The empty state sits in the same scroll area |
 | Status bar | `QStatusBar` | Messages, the Browser Agent dot and summary, the update indicator |
@@ -47,7 +48,8 @@ records how it maps onto Qt.
 - **One primary action:** Retry after a failure (it repeats the failed kind), Open when
   transcribed, Resume for a saved job, else Transcribe. A busy row has none, and its ⋯ menu is
   disabled with a tooltip.
-- **⋯ menu:** Clean up with AI (only when transcribed), Move to folder, Delete.
+- **⋯ menu:** Clean up with AI (only when transcribed), Open folder, Copy folder name (only for
+  a recording in its own folder), Move to folder, Delete.
 - **Output badges** for `.md`, `.summary.md`, `.live.md` and `.speakers.md` come from
   `Recording.outputs`. A click opens the file.
 - **Playback:** the one `AudioPlayerWidget` moves into the row that plays and back out when

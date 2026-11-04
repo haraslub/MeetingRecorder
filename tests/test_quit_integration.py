@@ -19,6 +19,7 @@ def test_quit_during_start_reconciles_late_success_and_releases_capture(tmp_path
         class Backend:
             active_system_source = 'Test system'
             active_mic_source = 'Test microphone'
+            capture_stamp = 'test'
             def set_level_callbacks(self, *args): pass
             def set_error_callback(self, callback): pass
             def set_system_tap(self, callback): pass

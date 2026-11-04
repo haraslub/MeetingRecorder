@@ -80,7 +80,11 @@ class TestSidecars:
     def make(self, directory, stem, suffixes):
         (directory / f"{stem}.m4a").write_bytes(b"audio")
         for suffix in suffixes:
-            (directory / f"{stem}{suffix}").write_text("x", encoding="utf-8")
+            if suffix == ".slides":
+                (directory / f"{stem}{suffix}").mkdir()
+                (directory / f"{stem}{suffix}" / "0001 00-00-04.jpg").write_bytes(b"jpeg")
+            else:
+                (directory / f"{stem}{suffix}").write_text("x", encoding="utf-8")
         return str(directory / f"{stem}.m4a")
 
     def test_every_sidecar_is_found(self, tmp_path):

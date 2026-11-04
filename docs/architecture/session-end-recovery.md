@@ -12,10 +12,12 @@ machine must be able to run the application. Closing the window during a recordi
   `SESSION_END_STOP_SECONDS` (4 s) for the capture thread, so both WAV files are closed before
   Windows can kill the process. Encoding may not finish in time.
 - **Recovery at start-up.** `RecordingManager.orphaned_captures` finds `_rec_mic_<id>.wav`
-  files, with their `_rec_system_<id>.wav` partner when one exists, in the output directory.
-  The encoder deletes both after a successful encode, so any left at start-up belong to a
+  files, with their `_rec_system_<id>.wav` partner and `_rec_slides_<id>/` folder when they
+  exist, in the output directory.
+  The encoder deletes both WAVs after a successful encode, so any left at start-up belong to a
   session that ended or crashed mid-recording. `MainWindow._recover_orphaned_captures` encodes
-  each pair into a new recording named after the last write. libsndfile reads the audio even
+  each pair into a new recording folder named after the creation time of the microphone WAV,
+  the start of the recording ([recording folders](recording-folders.md)). libsndfile reads the audio even
   when the process died before it wrote the final WAV header.
 - **A capture that cannot be encoded** is renamed `Unrecovered_mic_<id>.wav` /
   `Unrecovered_system_<id>.wav`, so start-up does not retry it, and the user is told where it is.
@@ -43,6 +45,9 @@ machine must be able to run the application. Closing the window during a recordi
   directory stay where they are.
 - A cancelled sign-out leaves the recording stopped and saved; the window does not ask again
   on close in that run, because the session-end flag stays set.
-- Live subtitles and speaker sidecars of an interrupted recording are lost; only the audio
-  is recovered.
+- Live subtitles and speaker sidecars of an interrupted recording are lost. Slide snapshots are
+  recovered: `orphaned_captures` pairs `_rec_slides_<id>/` with the WAVs of the same id, and
+  the snapshots move into the recording's folder after the recovered M4A is published. A capture
+  that cannot be encoded keeps its `_rec_slides_<id>/` beside the `Unrecovered_*` WAVs. See
+  [slide snapshots](slide-snapshots.md).
 - Tests: `tests/test_session_recovery.py`, `tests/test_single_instance.py`.
