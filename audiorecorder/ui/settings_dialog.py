@@ -158,6 +158,10 @@ class SettingsDialog(QDialog):
         self._auto_stop = QCheckBox("Automatically stop recordings started by automation")
         self._auto_stop.setChecked(self.config.get("auto_stop_recording", False))
         general_layout.addRow("", self._auto_stop)
+        self._auto_transcribe = QCheckBox(
+            "Transcribe each recording with Soniox when it is saved (paid)")
+        self._auto_transcribe.setChecked(self.config.get("auto_transcribe", False))
+        general_layout.addRow("", self._auto_transcribe)
         self._start_delay = QSpinBox()
         self._stop_delay = QSpinBox()
         self._end_grace = QSpinBox()
@@ -649,6 +653,7 @@ class SettingsDialog(QDialog):
         self.config["native_call_detection"] = self._native_calls.isChecked()
         self.config["launch_at_login"] = launch_at_login
         self.config["auto_stop_recording"] = self._auto_stop.isChecked()
+        self.config["auto_transcribe"] = self._auto_transcribe.isChecked()
         self.config["auto_start_delay_seconds"] = self._start_delay.value()
         self.config["auto_stop_delay_seconds"] = self._stop_delay.value()
         self.config["meeting_end_grace_seconds"] = self._end_grace.value()

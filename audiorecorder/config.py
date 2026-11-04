@@ -54,6 +54,8 @@ DEFAULTS = {
     # Slide snapshots grab the Meet or Teams browser window during a recording. A
     # snapshot can show private content, so they are opt-in.
     "slide_snapshots": False,
+    # Transcription is billed by Soniox, so starting it for every saved recording is opt-in.
+    "auto_transcribe": False,
     # Thresholds of the slide selector, changed in Settings; see slides.selector.SlideTuning.
     "slide_tuning": SlideTuning().to_config(),
     # A local-only signal offers the Record button when a meeting window is stable. It

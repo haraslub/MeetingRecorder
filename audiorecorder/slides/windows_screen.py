@@ -47,6 +47,19 @@ def meeting_window(windows, foreground, own_pid):
     return matches[0] if matches else None
 
 
+def meeting_title(windows, own_pid):
+    """The title of any browser window whose active tab is a meeting, or ''.
+
+    Unlike meeting_window it also counts a minimized, hidden or cloaked window: the call
+    still runs there, it only cannot be drawn.
+    """
+    for window in windows:
+        if (window.class_name == CHROMIUM_CLASS and window.process_id != own_pid
+                and _is_meeting_title(window.title)):
+            return window.title
+    return ""
+
+
 class _Win32:
     """The user32, gdi32 and dwmapi calls the window walk and the grab need, bound once."""
 
@@ -189,9 +202,8 @@ class WindowsScreenSource:
         return None if window is None else window.handle
 
     def meeting_title(self):
-        """The title of the meeting window, which names the recording, or ''."""
-        window = meeting_window(self.win32.windows(), self.win32.foreground(), self.own_pid)
-        return "" if window is None else window.title
+        """The title of the meeting window, also when minimized, or ''."""
+        return meeting_title(self.win32.windows(), self.own_pid)
 
     def grab(self, handle):
         """BGR pixels of the meeting window, height x width x 3."""

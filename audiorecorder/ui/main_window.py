@@ -36,6 +36,7 @@ from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
 from audiorecorder.meetings.browser_agent import BrowserAgentDetector
 from audiorecorder.meetings.calendar_detection import create_calendar_detector
+from audiorecorder.meetings.call_end import CallEndWatch
 from audiorecorder.meetings.detection import (
     CombinedMeetingDetector,
     MeetingPromptPolicy,
@@ -64,6 +65,7 @@ from audiorecorder.transcription.service import TranscriptionOptions
 from audiorecorder.transcription.soniox import SonioxWorker
 from audiorecorder.ui import icons, theme
 from audiorecorder.ui.audio_player import AudioPlayerWidget
+from audiorecorder.ui.call_end_prompt import CallEndPrompt
 from audiorecorder.ui.lifecycle_adapter import LifecycleAdapter
 from audiorecorder.ui.overlay import OverlayWidget
 from audiorecorder.ui.processing import ProcessingQueue
@@ -244,6 +246,9 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         # The subject of the meeting being recorded, which names its folder.
         self._meeting_title = ""
+        # Notices the end of the meeting of a running recording; None while not recording.
+        self._call_end = None
+        self._call_end_prompt = None
 
         self._manager = RecordingManager(config["output_dir"])
         self._active_encoders = []
@@ -321,9 +326,9 @@ class MainWindow(QMainWindow):
         self._meeting_timer = QTimer(self)
         self._meeting_timer.setInterval(5000)
         self._meeting_timer.timeout.connect(self._poll_for_meeting)
-        self._title_timer = QTimer(self)
-        self._title_timer.setInterval(5000)
-        self._title_timer.timeout.connect(self._sample_meeting_title)
+        self._call_timer = QTimer(self)
+        self._call_timer.setInterval(5000)
+        self._call_timer.timeout.connect(self._watch_call)
         self._sync_meeting_detection()
 
     def _create_tray_icon(self):
@@ -783,8 +788,9 @@ class MainWindow(QMainWindow):
         self._recording_start_time = time.time()
         self._timer.start(200)
         self._meeting_title = ""
-        self._sample_meeting_title()
-        self._title_timer.start()
+        self._call_end = CallEndWatch()
+        self._watch_call()
+        self._call_timer.start()
 
         if system_name is None:
             self._status_bar.showMessage(
@@ -851,6 +857,8 @@ class MainWindow(QMainWindow):
         self._lifecycle.process()
 
     def _begin_stop(self, recording):
+        self._call_end = None
+        self._close_call_end_prompt()
         self._state_card.set_state("stopping")
         self._status_bar.showMessage("Stopping capture…")
         self._capture_session.stop(recording)
@@ -887,8 +895,8 @@ class MainWindow(QMainWindow):
         system_path, mic_path = result.paths
         self._capture = None
         controller.stopped(result.recording, has_audio=bool(mic_path))
-        self._sample_meeting_title()
-        self._title_timer.stop()
+        self._watch_call()
+        self._call_timer.stop()
         self._stop_speaker_recognition()
         slides = self._finish_slides()
 
@@ -986,6 +994,11 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(
             f"Recovered an interrupted recording: {os.path.basename(path)}", 8000)
         self._refresh_list()
+        self._transcribe_when_saved(path)
+
+    def _transcribe_when_saved(self, path):
+        if self.config.get("auto_transcribe", False):
+            self._transcribe_recording(path, automatic=True)
 
     def _on_recovery_error(self, error, system_path, mic_path, output_path):
         # Slide snapshots stay under their temporary name beside the retained audio.
@@ -1051,6 +1064,7 @@ class MainWindow(QMainWindow):
         suffix = f" with {len(sidecars)} live transcript files" if sidecars else ""
         self._status_bar.showMessage(f"Saved: {os.path.basename(path)}{suffix}", 5000)
         self._refresh_list()
+        self._transcribe_when_saved(path)
         if not self._is_recording:
             self._recording_list.highlight_path(path)
         if worker.result.cleanup_errors:
@@ -1127,21 +1141,57 @@ class MainWindow(QMainWindow):
                 f"{len(failed)} older recording(s) could not move into a folder; "
                 "they stay where they are", 10000)
 
-    def _sample_meeting_title(self):
-        """Remember the first meeting subject seen while recording, for the folder name."""
-        if self._meeting_title:
-            return
-        titles = [candidate.title for candidate in self._lifecycle.candidates.values()]
+    def _watch_call(self):
+        """While recording: the first meeting subject for the folder name, and the call's end.
+
+        A calendar event is no evidence that the call still runs, so it names the folder but
+        does not keep the call alive.
+        """
+        candidates = list(self._lifecycle.candidates.values())
+        window_title = ""
         if self._slide_source is not None:
             try:
-                titles.append(self._slide_source.meeting_title())
+                window_title = self._slide_source.meeting_title()
             except OSError:
                 log.exception("the meeting window title could not be read")
-        for raw in titles:
-            title = meeting_title(raw)
-            if title:
-                self._meeting_title = title
-                return
+        if not self._meeting_title:
+            for raw in [candidate.title for candidate in candidates] + [window_title]:
+                title = meeting_title(raw)
+                if title:
+                    self._meeting_title = title
+                    break
+        if self._call_end is None:
+            return
+        live = [candidate for candidate in candidates if candidate.source != "calendar"]
+        present = bool(window_title) or (bool(live) and self.config.get("meeting_detection"))
+        event = self._call_end.observe(present, time.monotonic())
+        if event == "ask":
+            self._ask_call_end()
+        elif event == "back":
+            self._close_call_end_prompt()
+        elif event != "":
+            raise ValueError(f"unknown call end event: {event}")
+
+    def _ask_call_end(self):
+        if self._call_end_prompt is not None:
+            return
+        prompt = CallEndPrompt(None if sys.platform == "darwin" else self)
+        self._call_end_prompt = prompt
+        prompt.accepted.connect(self._stop_recording)
+        prompt.finished.connect(lambda _result: self._forget_call_end_prompt(prompt))
+        prompt.show()
+        prompt.raise_()
+        self._status_bar.showMessage("The call seems to have ended", 10000)
+
+    def _forget_call_end_prompt(self, prompt):
+        if self._call_end_prompt is prompt:
+            self._call_end_prompt = None
+        prompt.deleteLater()
+
+    def _close_call_end_prompt(self):
+        prompt, self._call_end_prompt = self._call_end_prompt, None
+        if prompt is not None:
+            prompt.close()
 
     def _refresh_list(self):
         self._manager = RecordingManager(self.config["output_dir"])
@@ -1232,13 +1282,19 @@ class MainWindow(QMainWindow):
                 return
             self._refresh_list()
 
-    def _transcribe_recording(self, path):
+    def _transcribe_recording(self, path, automatic=False):
+        """Queue a transcription; an automatic one reports problems in the status bar only."""
         if self._quitting:
             return
         if path in self._busy_paths:
-            QMessageBox.warning(self, "Busy", "This recording is already being processed.")
+            if not automatic:
+                QMessageBox.warning(self, "Busy", "This recording is already being processed.")
             return
         api_key = secrets.get_api_key()
+        if not api_key and automatic:
+            self._status_bar.showMessage(
+                "Not transcribed automatically: no Soniox API key is configured", 10000)
+            return
         if not api_key:
             QMessageBox.warning(
                 self,

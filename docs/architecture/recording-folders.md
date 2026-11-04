@@ -36,11 +36,12 @@ Meet codes and generic texts (`Active Microsoft Teams call`, `Scheduled meeting`
 characters Windows refuses in names, cuts at 60 characters on a word and drops trailing dots
 and spaces. `folder_name(started, title)` joins the start time and the title.
 
-**Title while recording** (`ui/main_window.py`). `_sample_meeting_title` runs when capture
-starts, every 5 seconds while it runs (`_title_timer`) and once at stop, until a title is found.
-It reads the titles of the meeting candidates the lifecycle adapter last polled (native
-detection, Browser Agent, calendar) and, on Windows, the title of the Meet or Teams browser
-window that Slides also uses (`WindowsScreenSource.meeting_title`). The first usable subject
+**Title while recording** (`ui/main_window.py`). `_watch_call` runs when capture starts,
+every 5 seconds while it runs (`_call_timer`) and once at stop, until a title is found. It also
+notices the end of the call ([call end prompt](call-end-prompt.md)). It reads the titles of the
+meeting candidates the lifecycle adapter last polled (native detection, Browser Agent,
+calendar) and, on Windows, the title of a Meet or Teams browser window, also a minimized one
+(`WindowsScreenSource.meeting_title`). The first usable subject
 wins. The title stays on this computer.
 
 **New recording** (`recordings/manager.py`). At stop, `new_recording_path(output_dir, started,

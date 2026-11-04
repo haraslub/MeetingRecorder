@@ -91,6 +91,13 @@ and say in the release notes what was not exercised.
       new snapshot appears; set **Settings → Slides → New slide when changed** to 0.5 % and
       press OK without stopping the recording: within about 15 seconds of typing a few
       words, a new snapshot is kept
+- [ ] Record a Meet or Teams web call and leave it: about 30 to 35 seconds later
+      **The call seems to have ended** asks; **Stop and save** stops and saves. Repeat with
+      **Keep recording**: no further question; rejoin and leave again: it asks again
+- [ ] Minimize the meeting window during a call: no question appears
+- [ ] Turn on **Transcribe each recording with Soniox when it is saved**: a stopped recording
+      is queued for Transcribe at once; without an API key the status bar says so and no dialog
+      opens
 - [ ] Record a Teams web call: the new folder is named `<start time> - <meeting subject>` and
       holds the M4A; after Transcribe and Clean up with AI it also holds the `.md` and
       `.summary.md` with the same name

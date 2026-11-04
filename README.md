@@ -133,9 +133,17 @@ an aid during the call; the batch transcription afterwards is more accurate.
 
 ### Keeps the slides
 
-Switch on **Slides** to keep what was shown during a Google Meet or Teams call in Chrome, Brave
-or Edge. Every 5 seconds of a recording the app looks at the browser window whose active tab is
-the meeting, also when another window covers it, and sorts what it sees:
+Switch on **Slides** to keep what was shown on screen during a Google Meet or Teams call in
+Chrome, Brave or Edge: presented slides, a shared screen or document, and who was in the call.
+It is not a screen video. Every 5 seconds of a recording the app takes a still picture of the
+browser window whose active tab is the meeting, also when another window covers it, compares
+it with what it already kept, and saves only what is new. A one-hour presentation gives a
+folder of its slides, not 700 nearly identical pictures. Everything stays on your computer:
+nothing is uploaded and the selection runs locally, without AI.
+
+![Slides on during a recording: the blue Slides button and the card line with the number saved](docs/screenshots/slides.png)
+
+What it sorts each picture into:
 
 - **Slides or a shared screen**: kept whenever the picture is new and has settled. A slide
   shown again is not kept twice, and moving camera tiles beside the slide are left out of the
@@ -154,11 +162,32 @@ and time in the recording, and a `slides.md` that lists them with their times. T
 on the row opens the folder. Snapshots of an interrupted recording are recovered with its audio
 at the next start.
 
+A recording folder with slides looks like this:
+
+```text
+2026-11-04 10-00-00 - Weekly sync with design\
+    2026-11-04 10-00-00 - Weekly sync with design.m4a
+    2026-11-04 10-00-00 - Weekly sync with design.md          (transcript)
+    2026-11-04 10-00-00 - Weekly sync with design.summary.md  (AI summary)
+    0001 00-00-05.jpg    (people at the start)
+    0002 00-02-10.jpg    (first slide, 2 min 10 s into the recording)
+    0003 00-03-40.jpg
+    slides.md            (every snapshot with its time)
+```
+
 Switching Slides on during a recording starts capture at once; switching it off stops it and
 keeps what was saved. Slides uses no paid service, so its button turns blue instead of violet
 and the cost strip ignores it. It is off by default. It works on Windows only for now; on macOS
-and Linux the button is disabled. See
+and Linux the button is disabled.
+
+**Settings → Slides** sets how often a picture is taken and how much has to change before a
+new one is kept. The **(i)** beside each value explains it. **OK** applies the values at once,
+also to a recording that is running. Lower **New slide when changed** (for example to 0.5 %)
+when somebody types into a shared chart or document and every step should be kept; raise it
+when small changes such as notifications or a scrolling chat give too many snapshots. See
 [slide snapshots architecture](docs/architecture/slide-snapshots.md).
+
+![Settings, Slides tab](docs/screenshots/settings-slides.png)
 
 ### Shows what costs money
 
@@ -219,6 +248,18 @@ On macOS, closing the main window keeps Meeting Recorder in the menu bar so dete
 available: its menu starts or stops a recording and opens the app. Prompts can use native
 notifications with actions, with the in-app windows as fallback.
 
+### Asks to stop when the call ends
+
+When the Meet or Teams web window of a running recording is gone for 30 seconds, a small window
+on top asks **The call seems to have ended**, with **Stop and save** and **Keep recording**. It
+only asks; the recording never stops on this by itself. Keep recording means no further
+question until the meeting window is back and gone again. The window closes by itself when the
+meeting comes back. A minimized meeting window still counts as the call. On Windows this works
+for Meet and Teams web in Chrome, Brave and Edge; with meeting detection on, every meeting that
+detection reports counts too. See [call end prompt](docs/architecture/call-end-prompt.md).
+
+![The call seems to have ended](docs/screenshots/call-end-prompt.png)
+
 ### Follows your light or dark theme
 
 The window follows the operating system's colour scheme.
@@ -254,6 +295,7 @@ On macOS, Settings adds automation, login and native call detection:
 |---|---|---|
 | General | **Automatically start qualified native calls** | Starts a recording for an approved Teams or Zoom call after the start countdown |
 | | **Automatically stop recordings started by automation** | Stops such a recording when the call ends, after the stop countdown |
+| | **Transcribe each recording with Soniox when it is saved (paid)** | Starts **Transcribe** for every saved or recovered recording. Off by default. Without an API key the status bar says so |
 | | **Start countdown**, **Stop countdown** | 5 to 120 seconds, default 5. The countdown window lets you cancel |
 | | **Absence grace (advanced)** | How long the call controls may be missing before a stop counts, 15 to 180 seconds, default 45 |
 | | **Meeting prompts** | Native macOS notifications or in-app windows |
@@ -262,7 +304,8 @@ On macOS, Settings adds automation, login and native call detection:
 | Native meeting detection | **Inspect native Teams/Zoom call controls** | Reads call-control names through Accessibility, not chat text or participants |
 | | Supervised test, diagnostics export, version approval | The steps that qualify one app version for automatic start and stop |
 
-The **Slides** tab sets when Slides keeps a snapshot. The **(i)** button beside each value
+The **Slides** tab sets when Slides keeps a snapshot (screenshot in
+[Keeps the slides](#keeps-the-slides)). The **(i)** button beside each value
 explains it on hover or click. **OK** applies the values at once, also to a recording that is
 running. **Restore defaults** sets them back. A new sample is compared with each kept snapshot
 on its own, not with an average of them, so many kept slides do not stop new ones.

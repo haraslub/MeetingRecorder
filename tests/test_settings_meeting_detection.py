@@ -203,3 +203,10 @@ def test_each_slide_value_has_an_info_button_with_its_explanation(dialog):
     assert len(infos) == len(dialog._slide_spins)
     assert all("<p>" in info.toolTip() for info in infos)
     assert "not with an average" in infos[1].toolTip()
+
+
+def test_automatic_transcription_is_off_by_default_and_saved(dialog):
+    assert not dialog._auto_transcribe.isChecked()
+    dialog._auto_transcribe.setChecked(True)
+    dialog._save_and_close()
+    assert dialog.get_config()["auto_transcribe"] is True

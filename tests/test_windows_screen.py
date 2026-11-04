@@ -3,7 +3,12 @@ import sys
 import pytest
 
 from audiorecorder.slides import windows_screen
-from audiorecorder.slides.windows_screen import CHROMIUM_CLASS, WindowInfo, meeting_window
+from audiorecorder.slides.windows_screen import (
+    CHROMIUM_CLASS,
+    WindowInfo,
+    meeting_title,
+    meeting_window,
+)
 
 OWN_PID = 4242
 
@@ -81,3 +86,15 @@ def test_render_draws_a_real_window():
     pixels = windows_screen._Win32().render(taskbar)
     assert pixels.shape[2] == 4
     assert pixels.shape[0] > 10 and pixels.shape[1] > 100
+
+
+@pytest.mark.parametrize("flags", [dict(minimized=True), dict(cloaked=True), dict(visible=False)])
+def test_a_minimized_or_hidden_meeting_still_has_its_title(flags):
+    windows = [window(1, "Inbox - Gmail - Google Chrome"), window(2, MEET, **flags)]
+    assert meeting_title(windows, OWN_PID) == MEET
+
+
+def test_no_meeting_title_without_a_meeting_tab_or_in_the_own_process():
+    assert meeting_title([window(1, "Inbox - Gmail - Google Chrome")], OWN_PID) == ""
+    assert meeting_title([window(1, MEET, pid=OWN_PID)], OWN_PID) == ""
+    assert meeting_title([window(1, MEET, class_name="Notepad")], OWN_PID) == ""
