@@ -19,6 +19,8 @@ MACOS_CODESIGN_IDENTITY = os.environ.get("MACOS_CODESIGN_IDENTITY")
 
 datas = [
     (str(ASSETS), "audiorecorder/assets"),
+    # The agent skill that Settings > AI agents installs (audiorecorder/api/skill.py).
+    (str(Path(SPECPATH) / "skills" / "meeting-recorder"), "skills/meeting-recorder"),
 ]
 # Local builds fail safe as custom. Only an explicitly marked official release bundles
 # this marker; runtime environment variables cannot change the packaged update policy.

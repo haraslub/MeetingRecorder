@@ -99,6 +99,7 @@ def test_transcribe_handler_guards_duplicate_and_queues_other_recording(monkeypa
 
     class Window(QWidget):
         _transcribe_recording = MainWindow._transcribe_recording
+        queue_transcription = MainWindow.queue_transcription
         _background_threads_running = MainWindow._background_threads_running
 
     window = Window()

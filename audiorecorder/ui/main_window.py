@@ -28,6 +28,8 @@ from PyQt6.QtWidgets import (
 )
 
 from audiorecorder import secrets
+from audiorecorder.api.commands import RemoteControl
+from audiorecorder.api.server import ApiServer
 from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.audio.runtime import capture_runtime
 from audiorecorder.audio.session import CaptureSession
@@ -330,6 +332,8 @@ class MainWindow(QMainWindow):
         self._call_timer.setInterval(5000)
         self._call_timer.timeout.connect(self._watch_call)
         self._sync_meeting_detection()
+        self._api = ApiServer(RemoteControl(self).handle)
+        self._api.configure(self.config)
 
     def _create_tray_icon(self):
         """Keep macOS detection reachable after the main window is closed."""
@@ -715,12 +719,18 @@ class MainWindow(QMainWindow):
             self._start_recording()
 
     def _start_recording(self):
-        if self._dictation_active:
+        if self.start_recording() == "dictation":
             self._status_bar.showMessage("Stop dictation before recording", 5000)
-            return
-        self._lifecycle.controller.blocked = self._recording_start_blocked()
-        self._lifecycle.controller.start(manual=True)
+
+    def start_recording(self):
+        """Start a manual recording; None when it starts, else why not: dictation or busy."""
+        if self._dictation_active:
+            return "dictation"
+        controller = self._lifecycle.controller
+        controller.blocked = self._recording_start_blocked()
+        started = controller.start(manual=True)
         self._lifecycle.process()
+        return None if started else "busy"
 
     def _automatic_capture_ready(self):
         return capture_readiness(self.config, self._last_capture_test, capture_runtime())
@@ -1227,15 +1237,44 @@ class MainWindow(QMainWindow):
         QGuiApplication.clipboard().setText(name)
         self._status_bar.showMessage(f"Copied: {name}", 3000)
 
+    def recording_busy(self, path):
+        """The kind of job queued or running for path ("transcribe", "cleanup"), else None."""
+        return self._busy_kinds.get(path) if path in self._busy_paths else None
+
+    def recording_failure(self, path):
+        """(kind, error) of the last failed job of path, until another job starts."""
+        return self._recording_list.failure(path)
+
+    def _release_playback(self, path):
+        if self._player.current_path == path:
+            self._player.stop_playback()
+            self._recording_list.clear_playing()
+
+    def move_recording(self, path, destination):
+        """Move the recording with its files into destination; the new audio path."""
+        self._release_playback(path)
+        moved = self._manager.move(path, destination)
+        self._refresh_list()
+        return moved
+
+    def rename_recording(self, path, name):
+        """Rename the recording, its files and its folder; the new audio path."""
+        self._release_playback(path)
+        renamed = self._manager.rename(path, name)
+        self._refresh_list()
+        return renamed
+
+    def delete_recording(self, path):
+        self._release_playback(path)
+        self._manager.delete(path)
+        self._refresh_list()
+
     def _move_recording(self, path):
         if path in self._busy_paths:
             QMessageBox.warning(
                 self, "Busy", "This recording is being processed. Wait until it finishes."
             )
             return
-        if self._player.current_path == path:
-            self._player.stop_playback()
-            self._recording_list.clear_playing()
 
         last_move_dir = self.config.get("last_move_dir", os.path.dirname(path))
         dest_dir = QFileDialog.getExistingDirectory(
@@ -1250,10 +1289,8 @@ class MainWindow(QMainWindow):
         save_config(self.config)
 
         try:
-            self._manager.move(path, dest_dir)
-
+            self.move_recording(path, dest_dir)
             self._status_bar.showMessage(f"Moved to {dest_dir}", 5000)
-            self._refresh_list()
         except Exception as e:
             QMessageBox.warning(self, "Move Error", f"Failed to move recording:\n{e}")
 
@@ -1272,38 +1309,40 @@ class MainWindow(QMainWindow):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
-            if self._player.current_path == path:
-                self._player.stop_playback()
-                self._recording_list.clear_playing()
             try:
-                self._manager.delete(path)
+                self.delete_recording(path)
             except Exception as error:
                 QMessageBox.warning(self, "Delete Error", f"Failed to delete recording:\n{error}")
-                return
-            self._refresh_list()
 
     def _transcribe_recording(self, path, automatic=False):
         """Queue a transcription; an automatic one reports problems in the status bar only."""
-        if self._quitting:
+        problem = self.queue_transcription(path)
+        if problem in (None, "closing") or (problem == "busy" and automatic):
             return
-        if path in self._busy_paths:
-            if not automatic:
-                QMessageBox.warning(self, "Busy", "This recording is already being processed.")
-            return
-        api_key = secrets.get_api_key()
-        if not api_key and automatic:
+        if problem == "busy":
+            QMessageBox.warning(self, "Busy", "This recording is already being processed.")
+        elif problem == "no-api-key" and automatic:
             self._status_bar.showMessage(
                 "Not transcribed automatically: no Soniox API key is configured", 10000)
-            return
-        if not api_key:
+        elif problem == "no-api-key":
             QMessageBox.warning(
                 self,
                 "API Key Missing",
                 "Soniox API key not configured.\nEnter it in Settings, or set the "
                 "SONIOX_API_KEY environment variable.",
             )
-            return
+        else:
+            raise ValueError(f"unknown transcription problem: {problem}")
 
+    def queue_transcription(self, path):
+        """Queue a transcription; None when queued, else why not: closing, busy, no-api-key."""
+        if self._quitting:
+            return "closing"
+        if path in self._busy_paths:
+            return "busy"
+        api_key = secrets.get_api_key()
+        if not api_key:
+            return "no-api-key"
         worker = SonioxWorker(
             api_key=api_key, audio_path=path,
             options=TranscriptionOptions.from_config(self.config),
@@ -1311,6 +1350,7 @@ class MainWindow(QMainWindow):
         self._busy_paths.add(path)
         self._busy_kinds[path] = "transcribe"
         self._processing.enqueue("transcribe", path, worker)
+        return None
 
     def _on_processing_progress(self, path, message):
         self._recording_list.set_processing(
@@ -1335,33 +1375,42 @@ class MainWindow(QMainWindow):
         self._show_processing_failure(path)
 
     def _cleanup_recording(self, path):
-        if self._quitting:
+        problem = self.queue_summary(path)
+        if problem == "summary-exists" and QMessageBox.question(
+            self,
+            "Already Processed",
+            "A summary file already exists. Overwrite?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes:
+            problem = self.queue_summary(path, overwrite=True)
+        if problem in (None, "closing", "summary-exists"):
             return
-        if path in self._busy_paths:
+        if problem == "busy":
             QMessageBox.warning(self, "Busy", "This recording is already being processed.")
-            return
+        elif problem == "no-transcript":
+            QMessageBox.warning(self, "No Transcript", "Transcribe the recording first.")
+        else:
+            raise ValueError(f"unknown summary problem: {problem}")
+
+    def queue_summary(self, path, overwrite=False):
+        """Queue the cleanup and summary of the transcript; None when queued, else why not:
+        closing, busy, no-transcript or summary-exists (only without overwrite)."""
+        if self._quitting:
+            return "closing"
+        if path in self._busy_paths:
+            return "busy"
         transcript_path = os.path.splitext(path)[0] + ".md"
         if not os.path.exists(transcript_path):
-            QMessageBox.warning(self, "No Transcript", "Transcribe the recording first.")
-            return
-
-        summary_path = os.path.splitext(path)[0] + ".summary.md"
-        if os.path.exists(summary_path):
-            reply = QMessageBox.question(
-                self,
-                "Already Processed",
-                "A summary file already exists. Overwrite?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            )
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-
+            return "no-transcript"
+        if not overwrite and os.path.exists(os.path.splitext(path)[0] + ".summary.md"):
+            return "summary-exists"
         worker = CleanupWorker(
             transcript_path, self.config.get("summary_prompt", DEFAULT_SUMMARY_PROMPT)
         )
         self._busy_paths.add(path)
         self._busy_kinds[path] = "cleanup"
         self._processing.enqueue("cleanup", path, worker)
+        return None
 
     def _toggle_subtitles(self):
         wanted = self._btn_rts.isChecked()
@@ -1683,18 +1732,22 @@ class MainWindow(QMainWindow):
             self._start_dictation()
 
     def _start_dictation(self):
+        problem = self.start_dictation()
+        if problem is not None:
+            QMessageBox.warning(self, *problem)
+
+    def start_dictation(self):
+        """Turn dictation on; None when it is on, else (title, message) of the reason."""
+        if self._dictation_active:
+            return None
         if self._is_recording:
-            QMessageBox.warning(
-                self, "Recording Active", "Stop recording before enabling dictation."
-            )
             self._btn_dictation.setChecked(False)
-            return
+            return "Recording Active", "Stop recording before enabling dictation."
 
         api_key = secrets.get_api_key()
         if not api_key:
-            QMessageBox.warning(self, "API Key Missing", "Soniox API key not configured.")
             self._btn_dictation.setChecked(False)
-            return
+            return "API Key Missing", "Soniox API key not configured."
 
         self._dictation = DictationEngine(
             api_key=api_key,
@@ -1712,16 +1765,14 @@ class MainWindow(QMainWindow):
             self._dictation.start()
         except HotkeyUnsupportedError as e:
             self._dictation = None
-            QMessageBox.warning(self, "Dictation Unavailable", str(e))
             self._btn_dictation.setChecked(False)
             self._btn_dictation.setEnabled(False)
             self._btn_dictation.setToolTip(str(e))
-            return
+            return "Dictation Unavailable", str(e)
         except Exception as e:
             self._dictation = None
-            QMessageBox.warning(self, "Dictation Unavailable", str(e))
             self._btn_dictation.setChecked(False)
-            return
+            return "Dictation Unavailable", str(e)
 
         self._dictation_active = True
         self._btn_dictation.setChecked(True)
@@ -1733,6 +1784,7 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(
             "Dictation ON - Ctrl+Space to dictate, Ctrl+Shift+Space to translate"
         )
+        return None
 
     def _stop_dictation(self):
         if self._dictation:
@@ -1798,10 +1850,9 @@ class MainWindow(QMainWindow):
 
         added = 0
         for src in files:
-            folder = os.path.join(
-                self.config["output_dir"], os.path.splitext(os.path.basename(src))[0])
-            dest = os.path.join(folder, os.path.basename(src))
-            if os.path.exists(dest):
+            try:
+                self.import_audio(src)
+            except FileExistsError:
                 reply = QMessageBox.question(
                     self,
                     "File Exists",
@@ -1810,13 +1861,26 @@ class MainWindow(QMainWindow):
                 )
                 if reply != QMessageBox.StandardButton.Yes:
                     continue
-            os.makedirs(folder, exist_ok=True)
-            shutil.copy2(src, dest)
+                self.import_audio(src, overwrite=True)
             added += 1
 
         if added:
-            self._refresh_list()
             self._status_bar.showMessage(f"Added {added} file(s)", 5000)
+
+    def import_audio(self, source, overwrite=False):
+        """Copy an audio file into its own folder in the output folder; the copy's path.
+
+        An existing copy raises FileExistsError unless overwrite is set.
+        """
+        name = os.path.basename(source)
+        folder = os.path.join(self.config["output_dir"], os.path.splitext(name)[0])
+        dest = os.path.join(folder, name)
+        if os.path.exists(dest) and not overwrite:
+            raise FileExistsError(dest)
+        os.makedirs(folder, exist_ok=True)
+        shutil.copy2(source, dest)
+        self._refresh_list()
+        return dest
 
     def _open_settings(self):
         dialog = SettingsDialog(
@@ -1825,6 +1889,7 @@ class MainWindow(QMainWindow):
             browser_agent=self._browser_agent,
             meeting_detector=self._native_meeting_detector,
             lifecycle=self._lifecycle,
+            api=self._api,
         )
         if dialog.exec():
             self.config = dialog.get_config()
@@ -1834,6 +1899,7 @@ class MainWindow(QMainWindow):
             os.makedirs(self.config["output_dir"], exist_ok=True)
             self._refresh_list()
             self._sync_meeting_detection()
+            self._api.configure(self.config)
             self._status_bar.showMessage("Settings saved", 3000)
 
     def closeEvent(self, event):
@@ -1883,6 +1949,7 @@ class MainWindow(QMainWindow):
         self._calendar_meeting_detector.stop()
         self._lifecycle.close()
         self._capture_session.close()
+        self._api.close()
         if self._tray_icon is not None:
             self._tray_icon.hide()
         QApplication.instance().removeEventFilter(self._hotkey_filter)

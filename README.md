@@ -12,7 +12,8 @@ recording to [Soniox](https://soniox.com) for a transcript with speaker labels a
 and can hand that transcript to the Claude CLI for a summary. During a call it can show live
 translated subtitles or a live transcript labelled by speaker, and on Windows it can keep a
 snapshot of each slide or shared screen in a Meet or Teams web call. Between calls it does
-push-to-talk dictation into any application.
+push-to-talk dictation into any application. An AI agent such as Claude Code or Codex can
+drive it through a local API and the bundled agent skill.
 
 Written for Google Meet, Teams and Zoom calls in Czech and English. It runs on Windows, macOS
 and Linux; the [support table](#what-works-where) lists the platform differences.
@@ -24,6 +25,7 @@ and Linux; the [support table](#what-works-where) lists the platform differences
 - [What works where](#what-works-where)
 - [Install](#install) · [Updates](#updates) · [Set it up](#set-it-up)
 - [Headless transcription](#headless-transcription)
+- [Control it from an AI agent or a script](#control-it-from-an-ai-agent-or-a-script)
 - [Your data stays on your machine](#your-data-stays-on-your-machine)
 - [Build from source](#build-from-source)
 
@@ -266,6 +268,16 @@ The window follows the operating system's colour scheme.
 
 ![Light theme](docs/screenshots/light-theme.png)
 
+### Takes commands from an AI agent
+
+Ask Claude Code or Codex to "record this call" or "stop the recording and transcribe it". Once
+you allow the local API in **Settings > AI agents** and install the bundled skill, the agent can
+start the app, record, mute, transcribe, summarize and organize recordings, and read the
+transcript files it gets back. The API listens on `127.0.0.1` only and needs a token. See
+[Control it from an AI agent or a script](#control-it-from-an-ai-agent-or-a-script).
+
+![Settings, AI agents tab](docs/screenshots/settings-ai-agents.png)
+
 ## Settings
 
 Open Settings with the gear icon. **OK** saves, **Cancel** discards. The General tab is what
@@ -326,6 +338,10 @@ needs one that passed for the current devices.
 
 ![Settings, Readiness tab](docs/screenshots/settings-readiness.png)
 
+The **AI agents** tab allows the local API (off by default), shows its port, bearer token and
+status, and installs the agent skill for Claude Code and Codex. See
+[Control it from an AI agent or a script](#control-it-from-an-ai-agent-or-a-script).
+
 Not in the dialog, only in the configuration file: `summary_prompt`, the instruction given to
 the Claude CLI for **Clean up with AI**. The Translate, Speakers and Slides buttons remember
 their last state; Dictation starts off.
@@ -382,9 +398,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.6.0-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.6.0-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.6.0-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.7.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.7.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.7.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn
@@ -482,6 +498,37 @@ Exit codes: `0` completed/skipped/dry-run, `1` operational failure, `2` invalid 
 and an optional `message`. Results go to stdout, errors and progress to stderr. Provider error
 bodies are not printed because they may contain sensitive data.
 
+## Control it from an AI agent or a script
+
+The running app can take commands over HTTP on `127.0.0.1`: start and stop a recording, mute
+the microphone, switch the live functions, list recordings, transcribe, summarize, import,
+rename, move and delete them, switch dictation, change the transcription language, and quit.
+An agent can also start the app first.
+
+1. In **Settings > AI agents**, turn on **Allow the local API** and press **OK**. A bearer token
+   is created; **New token** replaces it and refuses clients that kept the old one.
+2. Press **Install for Claude Code and Codex**. It copies the `meeting-recorder` skill into
+   `~/.claude/skills` and `~/.codex/skills` (or `$CODEX_HOME/skills`). Press it again after an
+   update. A skill folder that is a link, as in a development checkout, is left as it is.
+3. Ask the agent, for example "record this call" or "stop the recording and transcribe it".
+
+The skill uses `skills/meeting-recorder/mrctl.py`, a client that needs only Python 3.9 or newer:
+
+```sh
+python skills/meeting-recorder/mrctl.py start --launch --wait
+python skills/meeting-recorder/mrctl.py stop --wait
+python skills/meeting-recorder/mrctl.py transcribe latest --wait
+python skills/meeting-recorder/mrctl.py recordings --limit 5
+```
+
+The client reads the address and token from `api.json` in the settings directory, which the app
+writes while the API is allowed and removes when you switch it off. Any other HTTP client can
+send the same requests with `Authorization: Bearer <token>`;
+[the skill](skills/meeting-recorder/SKILL.md) lists every endpoint. The listener answers only
+requests addressed to `127.0.0.1` or `localhost`, so a web page cannot reach it through a
+domain of its own. Commands never open a dialog: a refusal comes back as
+`{"ok": false, "code", "message"}`. See [the local API architecture](docs/architecture/local-api.md).
+
 ## Your data stays on your machine
 
 Recordings, transcripts, summaries and slide snapshots are files in the output folder you
@@ -497,7 +544,8 @@ query only their granted meeting sites; Meeting Recorder requests no other tools
 content. **Clean up with AI** runs the Claude CLI on your machine, which sends the transcript
 to Anthropic under whatever agreement your Claude account has. Read the privacy terms of both
 services and decide whether the calls you record belong there. There is no telemetry and no
-account of our own.
+account of our own. The local API for agents is off until you allow it, listens on
+`127.0.0.1` only and refuses every request without its token.
 
 **Slides** snapshots never leave your computer: no function uploads them, transcription
 included. A snapshot shows the whole meeting window, including the browser's tabs and address

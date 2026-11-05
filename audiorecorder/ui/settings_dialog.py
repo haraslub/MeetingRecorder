@@ -28,7 +28,10 @@ from PyQt6.QtWidgets import (
 )
 
 from audiorecorder import macos_login, secrets
+from audiorecorder.api.discovery import RECORD_PATH, new_token
+from audiorecorder.api.skill import SKILL_SOURCE, install_skill
 from audiorecorder.audio.backend import SYSTEM_SOURCE_NONE, create_backend
+from audiorecorder.config import API_PORT_RANGE, DEFAULTS
 from audiorecorder.meetings.browser_agent import DOWNLOAD_URL, extension_folder, host_manifests
 from audiorecorder.meetings.native_calls import PROFILES, qualification_key
 from audiorecorder.readiness import CredentialProbe, microphone_permission
@@ -80,11 +83,13 @@ SCREEN_SHARE = 0.9
 
 class SettingsDialog(QDialog):
     def __init__(
-        self, config, parent=None, browser_agent=None, meeting_detector=None, lifecycle=None
+        self, config, parent=None, browser_agent=None, meeting_detector=None, lifecycle=None,
+        api=None,
     ):
         super().__init__(parent)
         self.config = dict(config)
         self._lifecycle = lifecycle
+        self._api = api
         self._login_original = self.config.get("launch_at_login", False)
         self._credential_status = "Unknown"
         self._credential_probe = CredentialProbe(self)
@@ -121,6 +126,8 @@ class SettingsDialog(QDialog):
         readiness_page = self._page("Readiness")
         slides_page = self._page("Slides")
         self._build_slides_page(slides_page[1])
+        agents_page = self._page("AI agents")
+        self._build_agents_page(agents_page[1])
         layout = general_page[1]
 
         # --- General ---
@@ -441,7 +448,7 @@ class SettingsDialog(QDialog):
         btn_row.addWidget(btn_cancel)
         btn_row.addWidget(btn_ok)
         outer.addLayout(btn_row)
-        self._pages = (general_page, readiness_page, slides_page)
+        self._pages = (general_page, readiness_page, slides_page, agents_page)
         self._buttons = btn_row
         self._fit_to_contents(self._pages, self._buttons)
 
@@ -469,6 +476,85 @@ class SettingsDialog(QDialog):
         form.addRow("", defaults)
         layout.addWidget(group)
         layout.addStretch()
+
+    def _build_agents_page(self, layout):
+        group = QGroupBox("Local API")
+        form = QFormLayout(group)
+        note = QLabel(
+            "Lets an AI agent or a script on this computer control Meeting Recorder over HTTP "
+            "on 127.0.0.1: start and stop a recording, transcribe, summarize, rename, move "
+            "and delete recordings. Every request needs the token. Agents on this computer "
+            "read it from the record file, which exists while the API is allowed.")
+        note.setWordWrap(True)
+        form.addRow(note)
+        self._local_api_enabled = QCheckBox("Allow the local API")
+        self._local_api_enabled.setChecked(bool(self.config.get("api_enabled")))
+        form.addRow("", self._local_api_enabled)
+        self._local_api_port = QSpinBox()
+        self._local_api_port.setRange(*API_PORT_RANGE)
+        self._local_api_port.setValue(self.config.get("api_port", DEFAULTS["api_port"]))
+        form.addRow("Port", self._local_api_port)
+
+        token_row = QWidget()
+        token_layout = QHBoxLayout(token_row)
+        token_layout.setContentsMargins(0, 0, 0, 0)
+        token_layout.setSpacing(4)
+        # Hidden, because this window may well be on a shared screen during a call.
+        self._local_api_token = QLineEdit(self.config.get("api_token") or "")
+        self._local_api_token.setReadOnly(True)
+        self._local_api_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self._local_api_token.setPlaceholderText("Created when you allow the API")
+        token_layout.addWidget(self._local_api_token, 1)
+        copy = QPushButton("Copy")
+        copy.clicked.connect(
+            lambda: QApplication.clipboard().setText(self._local_api_token.text()))
+        token_layout.addWidget(copy)
+        renew = QPushButton("New token")
+        renew.setToolTip("Replace the token; clients that kept the old one are refused.")
+        renew.clicked.connect(lambda: self._local_api_token.setText(new_token()))
+        token_layout.addWidget(renew)
+        form.addRow("Bearer token", token_row)
+        status = QLabel(self._api.status() if self._api is not None else "Off")
+        status.setWordWrap(True)
+        form.addRow("Status", status)
+        form.addRow("Record file", self._copyable(str(RECORD_PATH)))
+        layout.addWidget(group)
+
+        skill_group = QGroupBox("Agent skill")
+        skill_form = QFormLayout(skill_group)
+        skill_note = QLabel(
+            "The skill tells Claude Code and Codex how to use the local API through the "
+            "mrctl.py client beside it. Install it once, and again after an update.")
+        skill_note.setWordWrap(True)
+        skill_form.addRow(skill_note)
+        skill_form.addRow("Skill folder", self._copyable(str(SKILL_SOURCE)))
+        install = QPushButton("Install for Claude Code and Codex")
+        install.clicked.connect(self._install_skill)
+        skill_form.addRow("", install)
+        self._skill_result = QLabel("")
+        self._skill_result.setWordWrap(True)
+        self._skill_result.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        skill_form.addRow(self._skill_result)
+        layout.addWidget(skill_group)
+        layout.addStretch()
+
+    def _install_skill(self):
+        try:
+            results = install_skill()
+        except OSError as error:
+            self._skill_result.setText(f"Not installed: {error}")
+            return
+        lines = []
+        for agent, target, status in results:
+            if status in ("installed", "updated"):
+                lines.append(f"{agent}: {status} in {target}")
+            elif status == "linked":
+                lines.append(f"{agent}: {target} is a link and was left as it is")
+            elif status == "refused":
+                lines.append(f"{agent}: {target} holds another skill and was left as it is")
+            else:
+                raise ValueError(f"unknown skill install status: {status}")
+        self._skill_result.setText("\n".join(lines))
 
     def _explained(self, label, explanation):
         """A form label with an (i) button that shows the explanation on hover or click."""
@@ -675,6 +761,11 @@ class SettingsDialog(QDialog):
         self.config["mic_volume"] = self._mic_vol.value() / 100.0
         self.config["slide_tuning"] = {
             name: spin.value() for name, spin in self._slide_spins.items()}
+        self.config["api_enabled"] = self._local_api_enabled.isChecked()
+        self.config["api_port"] = self._local_api_port.value()
+        if self.config["api_enabled"] and not self._local_api_token.text():
+            self._local_api_token.setText(new_token())
+        self.config["api_token"] = self._local_api_token.text() or None
 
         entered_key = self._api_key_edit.text().strip()
         if entered_key:

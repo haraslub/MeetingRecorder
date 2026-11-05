@@ -27,6 +27,7 @@ class Window(QWidget):
     _update_tray_actions = MainWindow._update_tray_actions
     _update_lifecycle_tray = MainWindow._update_lifecycle_tray
     _start_recording = MainWindow._start_recording
+    start_recording = MainWindow.start_recording
     _stop_recording = MainWindow._stop_recording
     _recording_start_blocked = MainWindow._recording_start_blocked
 

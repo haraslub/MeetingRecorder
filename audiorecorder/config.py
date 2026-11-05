@@ -78,7 +78,14 @@ DEFAULTS = {
     "capture_readiness": None,
     "native_call_qualifications": {},
     "native_call_absence_qualifications": {},
+    # The local HTTP API for AI agents and scripts listens on 127.0.0.1 only. It is one
+    # more listener, so it is opt-in, and every request needs the bearer token.
+    "api_enabled": False,
+    "api_port": 47321,
+    "api_token": None,
 }
+
+API_PORT_RANGE = (1024, 65535)
 
 
 _DELAY_RANGES = {
@@ -107,6 +114,11 @@ def validated_config(stored):
     if not isinstance(cfg["output_dir"], str) or not cfg["output_dir"].strip():
         cfg["output_dir"] = DEFAULTS["output_dir"]
     cfg["slide_tuning"] = SlideTuning.from_config(cfg["slide_tuning"]).to_config()
+    low, high = API_PORT_RANGE
+    if type(cfg["api_port"]) is not int or not low <= cfg["api_port"] <= high:
+        cfg["api_port"] = DEFAULTS["api_port"]
+    if not _valid_token(cfg["api_token"]):
+        cfg["api_token"] = None
     from audiorecorder.meetings.native_profiles import PROFILES
 
     for name in ("native_call_qualifications", "native_call_absence_qualifications"):
@@ -149,6 +161,11 @@ def validated_config(stored):
             for key in ("system", "mic")
         }
     return cfg
+
+
+def _valid_token(token):
+    return (isinstance(token, str) and 32 <= len(token) <= 128
+            and all(c.isascii() and (c.isalnum() or c in "-_") for c in token))
 
 
 def load_config():
