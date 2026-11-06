@@ -33,18 +33,22 @@ from audiorecorder.api.server import ApiServer
 from audiorecorder.audio.encoder import mix_and_encode
 from audiorecorder.audio.runtime import capture_runtime
 from audiorecorder.audio.session import CaptureSession
-from audiorecorder.config import DEFAULT_SUMMARY_PROMPT, save_config
+from audiorecorder.config import CONFIG_DIR, DEFAULT_SUMMARY_PROMPT, save_config
 from audiorecorder.dictation.engine import DictationEngine
 from audiorecorder.dictation.hotkeys import HotkeyListener, HotkeyUnsupportedError
 from audiorecorder.meetings.browser_agent import BrowserAgentDetector
 from audiorecorder.meetings.calendar_detection import create_calendar_detector
 from audiorecorder.meetings.call_end import CallEndWatch
+from audiorecorder.meetings.call_log import CallLog
+from audiorecorder.meetings.call_watch import CallWatch
 from audiorecorder.meetings.detection import (
     CombinedMeetingDetector,
     MeetingPromptPolicy,
     create_meeting_detector,
 )
+from audiorecorder.meetings.microphone_use import create_microphone_monitor
 from audiorecorder.readiness import capture_readiness
+from audiorecorder.recordings import journal
 from audiorecorder.recordings.manager import (
     RecordingManager,
     new_recording_path,
@@ -85,6 +89,8 @@ AUTO_START_SECONDS = 5
 AUTO_START_SOURCES = frozenset()  # Native heuristics await per-source qualification.
 # Windows shows its "apps are preventing shutdown" screen after about five seconds.
 SESSION_END_STOP_SECONDS = 4
+# What the call watch saw change, so a call that was not recorded can be explained later.
+CALL_LOG_PATH = CONFIG_DIR / "call-detection.log"
 
 # Speaker colours repeat after the third remote voice.
 REMOTE_COLOURS = ("speaker.r1", "speaker.r2", "speaker.r3")
@@ -251,6 +257,13 @@ class MainWindow(QMainWindow):
         # Notices the end of the meeting of a running recording; None while not recording.
         self._call_end = None
         self._call_end_prompt = None
+        # Follows calls also between recordings, to start and stop recordings by itself.
+        self._call_watch = CallWatch()
+        self._microphone = create_microphone_monitor()
+        self._call_log = CallLog(CALL_LOG_PATH)
+        # The live journal of the running recording and the text last written to it.
+        self._journal_path = None
+        self._journal_text = ""
 
         self._manager = RecordingManager(config["output_dir"])
         self._active_encoders = []
@@ -386,6 +399,18 @@ class MainWindow(QMainWindow):
             if self._meeting_prompt is not None:
                 self._meeting_prompt.close()
         self._update_browser_status()
+        self._sync_call_timer()
+
+    def _automatic_call_recording(self):
+        """Calls start recordings by themselves; needs to know who holds the microphone."""
+        return self._microphone is not None and self.config.get("automatic_recording", False)
+
+    def _sync_call_timer(self):
+        if self._is_recording or self._automatic_call_recording():
+            if not self._call_timer.isActive():
+                self._call_timer.start()
+        else:
+            self._call_timer.stop()
 
     def _update_browser_status(self):
         status = self._browser_agent.status()
@@ -798,6 +823,10 @@ class MainWindow(QMainWindow):
         self._recording_start_time = time.time()
         self._timer.start(200)
         self._meeting_title = ""
+        self._journal_text = ""
+        stamp = self._capture.capture_stamp
+        self._journal_path = None if stamp is None else journal.journal_path(
+            self._recording_config[result.recording]["output_dir"], stamp)
         self._call_end = CallEndWatch()
         self._watch_call()
         self._call_timer.start()
@@ -906,11 +935,12 @@ class MainWindow(QMainWindow):
         self._capture = None
         controller.stopped(result.recording, has_audio=bool(mic_path))
         self._watch_call()
-        self._call_timer.stop()
         self._stop_speaker_recognition()
         slides = self._finish_slides()
 
         self._is_recording = False
+        self._sync_call_timer()
+        live_journal, self._journal_path = self._journal_path, None
         self._timer.stop()
         self._level_bars.stop()
         self._state_card.set_state("idle")
@@ -926,9 +956,13 @@ class MainWindow(QMainWindow):
                 "subtitles": self._finish_subtitles(),
                 "speakers": self._speaker_sidecar_payload(),
                 "slides": slides.path if slides is not None else None,
+                "journal": journal.journal_for_capture(mic_path),
             }
-            if any(pending.values()):
-                self._pending_sidecars[output_path] = pending
+            # The final state, for a crash before the encoder publishes the M4A.
+            self._save_journal(
+                pending["journal"], self._meeting_title, pending["subtitles"],
+                pending["speakers"])
+            self._pending_sidecars[output_path] = pending
 
             self._status_bar.showMessage("Encoding to M4A...")
 
@@ -943,6 +977,8 @@ class MainWindow(QMainWindow):
             self._finish_subtitles()
             if slides is not None:
                 slides.discard()
+            if live_journal is not None:
+                journal.remove(live_journal)
             self._status_bar.showMessage("Recording cancelled (no audio)")
             self._recording_config.pop(result.recording, None)
         self._lifecycle.process()
@@ -988,9 +1024,15 @@ class MainWindow(QMainWindow):
     def _recover_orphaned_captures(self):
         """Encode capture files that a logged-off or crashed session left behind."""
         for system_path, mic_path, slides_path, started in self._manager.orphaned_captures():
-            output_path = new_recording_path(self.config["output_dir"], started)
-            if slides_path is not None:
-                self._pending_sidecars[output_path] = {"slides": slides_path}
+            live_journal = journal.journal_for_capture(mic_path)
+            title, subtitles, speakers = journal.load(live_journal)
+            output_path = new_recording_path(self.config["output_dir"], started, title)
+            self._pending_sidecars[output_path] = {
+                "subtitles": subtitles,
+                "speakers": speakers,
+                "slides": slides_path,
+                "journal": live_journal,
+            }
             self._enqueue_encoder(
                 system_path, mic_path, output_path, self.config,
                 self._on_recovery_finished,
@@ -1011,7 +1053,8 @@ class MainWindow(QMainWindow):
             self._transcribe_recording(path, automatic=True)
 
     def _on_recovery_error(self, error, system_path, mic_path, output_path):
-        # Slide snapshots stay under their temporary name beside the retained audio.
+        # Slide snapshots and the live journal stay under their temporary names beside the
+        # retained audio.
         self._pending_sidecars.pop(output_path, None)
         remove_empty_folder(output_path)
         kept = self._manager.set_aside_capture(system_path, mic_path)
@@ -1152,10 +1195,11 @@ class MainWindow(QMainWindow):
                 "they stay where they are", 10000)
 
     def _watch_call(self):
-        """While recording: the first meeting subject for the folder name, and the call's end.
+        """The call: its subject for the folder name, its start and its end.
 
         A calendar event is no evidence that the call still runs, so it names the folder but
-        does not keep the call alive.
+        does not keep the call alive. Only exact evidence, who holds the microphone, starts
+        or stops a recording by itself; a meeting window alone only asks.
         """
         candidates = list(self._lifecycle.candidates.values())
         window_title = ""
@@ -1170,17 +1214,58 @@ class MainWindow(QMainWindow):
                 if title:
                     self._meeting_title = title
                     break
-        if self._call_end is None:
-            return
         live = [candidate for candidate in candidates if candidate.source != "calendar"]
-        present = bool(window_title) or (bool(live) and self.config.get("meeting_detection"))
-        event = self._call_end.observe(present, time.monotonic())
-        if event == "ask":
-            self._ask_call_end()
-        elif event == "back":
-            self._close_call_end_prompt()
-        elif event != "":
-            raise ValueError(f"unknown call end event: {event}")
+        meeting_shown = bool(window_title) or (
+            bool(live) and self.config.get("meeting_detection", False))
+        microphone = self._microphone_use()
+        exact = microphone is not None
+        now = time.monotonic()
+        present = self._call_watch.observe(microphone, meeting_shown, self._is_recording, now)
+        if self._call_end is not None:
+            if self._journal_path is not None:
+                self._save_journal(
+                    self._journal_path, self._meeting_title, self._live_subtitle_payload(),
+                    self._live_speaker_payload())
+            event = self._call_end.observe(present, now)
+            if event == "ask" and exact and self.config.get("auto_stop_recording", False):
+                action = "stop"
+                self._status_bar.showMessage("The call ended; saving the recording", 10000)
+                self._stop_recording()
+            elif event == "ask":
+                action = "ask"
+                self._ask_call_end()
+            elif event == "back":
+                action = ""
+                self._close_call_end_prompt()
+            elif event == "":
+                action = ""
+            else:
+                raise ValueError(f"unknown call end event: {event}")
+        elif self._automatic_call_recording() and self._call_watch.should_start(present, exact):
+            action = "start" if self._start_call_recording() else "start refused"
+        else:
+            action = ""
+        self._call_log.record(present, microphone, meeting_shown, action)
+
+    def _microphone_use(self):
+        """Who holds the microphone, or None when this system cannot tell."""
+        if self._microphone is None:
+            return None
+        try:
+            return self._microphone.use()
+        except OSError:
+            log.exception("the microphone records could not be read")
+            return None
+
+    def _start_call_recording(self):
+        """Start for a call; False when dictation or another operation holds the recorder."""
+        if self.start_recording() is not None:
+            return False
+        self._call_watch.started()
+        if self._meeting_prompt is not None:
+            self._meeting_prompt.close()
+        self._status_bar.showMessage("A call started; recording it", 10000)
+        return True
 
     def _ask_call_end(self):
         if self._call_end_prompt is not None:
@@ -1662,6 +1747,35 @@ class MainWindow(QMainWindow):
             return None
         return lines, dict(self._speaker_name_map)
 
+    def _live_speaker_payload(self):
+        """The speaker sidecar payload so far, including the engines still running."""
+        timed = list(self._speaker_segments)
+        for engine in (self._mic_speaker_engine, self._remote_speaker_engine):
+            if engine is not None:
+                timed.extend(engine.timed_speaker_transcript())
+        if not timed:
+            return None
+        timed.sort(key=lambda line: line[0])
+        return [line[1:] for line in timed], dict(self._speaker_name_map)
+
+    def _live_subtitle_payload(self):
+        if self._subtitle_engine is None:
+            return None
+        lines = self._subtitle_engine.transcript()
+        return (lines, self._subtitle_engine.target_language) if lines else None
+
+    def _save_journal(self, path, title, subtitles, speakers):
+        """Write the live journal when it changed; a failure costs only the crash copy."""
+        text = journal.encode(title, subtitles, speakers)
+        if text == self._journal_text:
+            return
+        try:
+            journal.save(path, text)
+        except OSError:
+            log.exception("the live journal could not be written")
+            return
+        self._journal_text = text
+
     def _refresh_audio_taps(self):
         """Attach each active realtime consumer without doing work in audio callbacks."""
         if self._capture is None:
@@ -1719,6 +1833,9 @@ class MainWindow(QMainWindow):
                     written.append(path)
             except OSError:
                 log.exception("the slide snapshots could not be placed beside the recording")
+        live_journal = pending.get("journal")
+        if live_journal is not None:
+            journal.remove(live_journal)
         return written
 
     def _on_subtitle_error(self, message):

@@ -12,6 +12,12 @@ A separate setting, off by default, starts **Transcribe** for every recording wh
 so a call is transcribed without a visit to the app. It does not start **Clean up with AI**;
 the owner chose transcription only.
 
+- **Changed on 2026-11-06 for Windows.** The window title missed the end of Teams web calls:
+  a Teams tab keeps `| Microsoft Teams` in its title after the call. On Windows the call is
+  now present while a meeting app or a meeting browser holds the microphone, and with
+  `auto_stop_recording` on the recording stops and saves without asking. Without microphone
+  records (macOS) this prompt works as described here. See
+  [automatic call recording](automatic-call-recording.md).
 - **Not the native lifecycle.** The automatic stop of `meetings/lifecycle.py` acts only on
   recordings it started itself, after qualified native evidence on macOS. The prompt here works
   for any recording, manual ones included, and only asks.

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import av
 
+from audiorecorder.recordings.journal import journal_for_capture
 from audiorecorder.recordings.naming import folder_name
 from audiorecorder.slides.store import INDEX as SLIDES_INDEX
 from audiorecorder.slides.store import LEGACY_INDEX, LEGACY_SUFFIX, snapshot_files
@@ -185,10 +186,12 @@ class RecordingManager:
     def set_aside_capture(system_path, mic_path):
         """Rename capture files that could not be encoded, so start-up stops retrying them.
 
-        Returns the new paths; the audio stays for the user to inspect.
+        Returns the new paths; the audio stays for the user to inspect, and so does the
+        live journal with its subtitles and title.
         """
         kept = []
-        for path in (mic_path, system_path):
+        journal = journal_for_capture(mic_path)
+        for path in (mic_path, system_path, str(journal) if journal.exists() else None):
             if path is None:
                 continue
             source = Path(path)

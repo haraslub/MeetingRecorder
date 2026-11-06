@@ -49,7 +49,10 @@ Capture starts and stops outside the GUI thread. Encoding runs in a bounded back
 so the next call can start while the previous one is still being saved. Validated audio is
 published atomically. If capture cannot shut down cleanly, the card turns to **Stop failed**
 with **Retry stop** and **Details**; the audio recorded so far stays on disk. Audio that a
-crash or a log-off left behind is encoded at the next start.
+crash or a log-off left behind is encoded at the next start. The audio is written to disk
+while the call runs and is deleted only after the M4A is saved, so a crash during encoding
+loses nothing. Live subtitles, live speaker lines and the meeting subject are also kept on
+disk while recording, and the recovered recording gets them back.
 
 ![Stop failed, with Retry stop](docs/screenshots/stop-failed.png)
 
@@ -250,11 +253,28 @@ On macOS, closing the main window keeps Meeting Recorder in the menu bar so dete
 available: its menu starts or stops a recording and opens the app. Prompts can use native
 notifications with actions, with the in-app windows as fallback.
 
+### Records calls by itself on Windows
+
+With **Record calls automatically, without asking** on, a call starts a recording at once,
+with no prompt and no countdown. Windows records which program holds the microphone, the
+information behind the microphone icon in the taskbar. A call is:
+
+- Teams (new or classic), Zoom, Webex or Slack desktop holding the microphone, or
+- a browser (Brave, Chrome, Edge, Firefox) holding the microphone while a Meet or Teams web
+  window is open. After that, the browser's hold alone keeps the call, so you can switch tabs.
+
+With **Stop and save the recording when the call ends** on, the recording is saved once the
+call has released the microphone for 30 seconds, also a recording you started yourself.
+Stopping a recording by hand during the call is respected: the same call does not start it
+again. Every change the watch sees is written to `call-detection.log` in the settings folder
+(program names, no titles). See [automatic call recording](docs/architecture/automatic-call-recording.md).
+
 ### Asks to stop when the call ends
 
 When the Meet or Teams web window of a running recording is gone for 30 seconds, a small window
 on top asks **The call seems to have ended**, with **Stop and save** and **Keep recording**. It
-only asks; the recording never stops on this by itself. Keep recording means no further
+only asks; the recording never stops on this by itself. On Windows the end of the call is the
+release of the microphone instead, and with automatic stop on it saves without asking. Keep recording means no further
 question until the meeting window is back and gone again. The window closes by itself when the
 meeting comes back. A minimized meeting window still counts as the call. On Windows this works
 for Meet and Teams web in Chrome, Brave and Edge; with meeting detection on, every meeting that
@@ -288,6 +308,8 @@ you see on Windows and Linux; macOS adds the options shown further down.
 | Group | Setting | What it does |
 |---|---|---|
 | General | **Output folder** | Where recordings, transcripts and side files are saved. Default `~/MeetingRecorder`; an unchanged `~/AudioRecordings` of an older version is renamed to it at start |
+| | **Record calls automatically, without asking** (Windows) | Starts a recording as soon as a call holds the microphone. Off by default |
+| | **Stop and save the recording when the call ends** (Windows) | Saves the recording once the call has released the microphone for 30 seconds; off, the recorder asks |
 | Meeting detection | **Show a recording prompt when a meeting is detected** | Turns on browser, native and calendar detection. Off by default |
 | | **Browser agent** | Shows the connected browser profiles and their enabled meeting tools, or why it is not connected |
 | | **Download**, **Extension folder** | The Browser Agent download page and, once installed, the local extension folder to load in the browser. Each has a copy button |
@@ -361,7 +383,7 @@ please report what you find.
 | Live speaker labels | yes | yes on macOS 13+ | only with a monitor source |
 | Slide snapshots (Slides) | Meet and Teams web in Chrome, Brave, Edge | no | no |
 | Native meeting popup | no | Teams, Zoom, Webex, Slack Huddles | no |
-| Automatic start and stop | no | qualified Teams and Zoom versions | no |
+| Automatic start and stop | yes, from who holds the microphone | qualified Teams and Zoom versions | no |
 | Browser meeting popup | Browser Agent (Brave/Chrome) | Browser Agent (Brave/Chrome) | not supported |
 | Calendar meeting signal | no | opt-in through EventKit | no |
 | Dictation hotkey | yes | yes, needs Accessibility permission | X11 only, not on Wayland |
@@ -398,9 +420,9 @@ Unless a release explicitly says it is notarized, its builds are unsigned. Check
 of your download against `SHA256SUMS.txt` in the same release before running it:
 
 ```sh
-sha256sum Meeting-Recorder-0.7.0-x64.exe                    # Linux or Git Bash
-shasum -a 256 Meeting-Recorder-0.7.0-arm64.dmg              # macOS
-certutil -hashfile Meeting-Recorder-0.7.0-x64.exe SHA256    # Windows Command Prompt
+sha256sum Meeting-Recorder-0.8.0-x64.exe                    # Linux or Git Bash
+shasum -a 256 Meeting-Recorder-0.8.0-arm64.dmg              # macOS
+certutil -hashfile Meeting-Recorder-0.8.0-x64.exe SHA256    # Windows Command Prompt
 ```
 
 - **Windows** - a single `.exe`, or the same executable in a `.zip`. SmartScreen will warn

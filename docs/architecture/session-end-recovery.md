@@ -45,9 +45,16 @@ machine must be able to run the application. Closing the window during a recordi
   directory stay where they are.
 - A cancelled sign-out leaves the recording stopped and saved; the window does not ask again
   on close in that run, because the session-end flag stays set.
-- Live subtitles and speaker sidecars of an interrupted recording are lost. Slide snapshots are
-  recovered: `orphaned_captures` pairs `_rec_slides_<id>/` with the WAVs of the same id, and
+- Live subtitles, speaker lines and the meeting subject are kept in `_rec_live_<id>.json`
+  beside the WAVs (`recordings/journal.py`). `_watch_call` rewrites it every 5 seconds while
+  recording when it changed, `_capture_stopped` writes the final state, and it is removed after
+  the sidecars are written. Recovery names the folder with the subject and writes `.live.md`
+  and the speaker files from it; a capture that cannot be encoded keeps it as
+  `Unrecovered_live_<id>.json`. At most the last 5 seconds of live lines can be lost. The WAVs
+  themselves are written continuously and deleted only after the M4A is published, so a crash
+  during encoding keeps all audio. Slide snapshots are recovered: `orphaned_captures` pairs `_rec_slides_<id>/` with the WAVs of the same id, and
   the snapshots move into the recording's folder after the recovered M4A is published. A capture
   that cannot be encoded keeps its `_rec_slides_<id>/` beside the `Unrecovered_*` WAVs. See
   [slide snapshots](slide-snapshots.md).
-- Tests: `tests/test_session_recovery.py`, `tests/test_single_instance.py`.
+- Tests: `tests/test_session_recovery.py`, `tests/test_live_journal.py`,
+  `tests/test_single_instance.py`.

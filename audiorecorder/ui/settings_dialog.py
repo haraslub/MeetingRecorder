@@ -153,17 +153,30 @@ class SettingsDialog(QDialog):
 
         self._automatic_recording = QCheckBox("Automatically start qualified native calls")
         self._automatic_recording.setChecked(self.config.get("automatic_recording", False))
-        self._automatic_recording.setEnabled(self._meeting_detection.isChecked())
-        self._meeting_detection.toggled.connect(self._automatic_recording.setEnabled)
-        self._automatic_recording.setToolTip(
-            "Off by default. A visible countdown always allows cancellation. "
-            "Current window/media signals are advisory until validated. "
-            "Browser automation is deferred."
-        )
-        general_layout.addRow("", self._automatic_recording)
-
         self._auto_stop = QCheckBox("Automatically stop recordings started by automation")
         self._auto_stop.setChecked(self.config.get("auto_stop_recording", False))
+        if sys.platform == "win32":
+            # Windows records who holds the microphone, exact evidence of a call, so the
+            # recorder acts without a countdown and without meeting detection.
+            self._automatic_recording.setText("Record calls automatically, without asking")
+            self._automatic_recording.setToolTip(
+                "Starts when a call takes the microphone: Teams or Zoom, or a browser "
+                "while a Meet or Teams window is open."
+            )
+            self._auto_stop.setText("Stop and save the recording when the call ends")
+            self._auto_stop.setToolTip(
+                "When the call releases the microphone for 30 seconds. Off: the recorder "
+                "asks instead."
+            )
+        else:
+            self._automatic_recording.setEnabled(self._meeting_detection.isChecked())
+            self._meeting_detection.toggled.connect(self._automatic_recording.setEnabled)
+            self._automatic_recording.setToolTip(
+                "Off by default. A visible countdown always allows cancellation. "
+                "Current window/media signals are advisory until validated. "
+                "Browser automation is deferred."
+            )
+        general_layout.addRow("", self._automatic_recording)
         general_layout.addRow("", self._auto_stop)
         self._auto_transcribe = QCheckBox(
             "Transcribe each recording with Soniox when it is saved (paid)")
@@ -216,12 +229,15 @@ class SettingsDialog(QDialog):
         login_buttons.addWidget(open_login)
         general_layout.addRow("", login_buttons)
         general_layout.addRow("", self._launch_at_login)
-        # Automatic start, native prompts and login items exist only on macOS.
+        # Countdowns, native prompts and login items exist only on macOS; automatic start
+        # and stop also on Windows.
         for row in (
-            self._automatic_recording, self._auto_stop, self._start_delay, self._stop_delay,
-            self._end_grace, self._notification_style, self._login_status, login_buttons,
+            self._start_delay, self._stop_delay, self._end_grace, self._notification_style,
+            self._login_status, login_buttons,
         ):
             general_layout.setRowVisible(row, sys.platform == "darwin")
+        for row in (self._automatic_recording, self._auto_stop):
+            general_layout.setRowVisible(row, sys.platform in ("darwin", "win32"))
 
         layout.addWidget(general_group)
 

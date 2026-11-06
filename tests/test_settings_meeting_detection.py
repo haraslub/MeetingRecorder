@@ -151,11 +151,32 @@ def test_macos_only_controls_are_hidden_on_windows(app, monkeypatch, tmp_path):
                             "translation_target": "en"})
     try:
         layout = built._automatic_recording.parentWidget().layout()
-        for control in (built._automatic_recording, built._notification_style,
-                        built._start_delay, built._login_status):
+        for control in (built._notification_style, built._start_delay, built._login_status):
             assert not layout.isRowVisible(control)
         assert not built._meeting_detection.isHidden()
         assert not built._meeting_detection.isChecked()
+    finally:
+        built.deleteLater()
+
+
+def test_windows_offers_automatic_call_recording_without_meeting_detection(
+        app, monkeypatch, tmp_path):
+    monkeypatch.setattr(settings_module, "create_backend", FakeBackend)
+    monkeypatch.setattr(settings_module.secrets, "has_stored_key", lambda: False)
+    monkeypatch.setattr(settings_module.sys, "platform", "win32")
+    built = SettingsDialog({"output_dir": str(tmp_path), "language": "en",
+                            "translation_target": "en", "meeting_detection": False})
+    try:
+        layout = built._automatic_recording.parentWidget().layout()
+        assert layout.isRowVisible(built._automatic_recording)
+        assert layout.isRowVisible(built._auto_stop)
+        assert built._automatic_recording.isEnabled()
+        assert built._automatic_recording.text() == "Record calls automatically, without asking"
+        built._automatic_recording.setChecked(True)
+        built._auto_stop.setChecked(True)
+        built._save_and_close()
+        config = built.get_config()
+        assert config["automatic_recording"] and config["auto_stop_recording"]
     finally:
         built.deleteLater()
 
