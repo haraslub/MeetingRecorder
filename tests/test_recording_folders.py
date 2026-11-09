@@ -131,6 +131,27 @@ def test_rename_renames_the_folder_with_the_files(tmp_path):
     assert not (tmp_path / NAME).exists()
 
 
+@pytest.mark.parametrize("name", ["", "..", "../escape", ".hidden", "a/b", "a\\b", "a:",
+                                  "a\x00b", "a.", "CON", "nul.txt", "LPT9"])
+def test_rename_rejects_unsafe_names_before_creating_files(tmp_path, name):
+    audio = make_folder_recording(tmp_path)
+    before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
+    with pytest.raises(ValueError):
+        RecordingManager(str(tmp_path)).rename(str(audio), name)
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == before
+
+
+def test_rename_same_name_is_a_noop_and_loose_recordings_are_supported(tmp_path):
+    audio = tmp_path / "Old.m4a"
+    audio.write_bytes(b"audio")
+    audio.with_suffix(".md").write_text("transcript")
+    manager = RecordingManager(str(tmp_path))
+    assert manager.rename(str(audio), " Old ") == str(audio)
+    new = manager.rename(str(audio), "New")
+    assert new == str(tmp_path / "New.m4a")
+    assert (tmp_path / "New.md").read_text() == "transcript"
+
+
 def test_delete_removes_the_folder_with_everything_the_app_wrote(tmp_path):
     audio = make_folder_recording(tmp_path)
     RecordingManager(str(tmp_path)).delete(str(audio))

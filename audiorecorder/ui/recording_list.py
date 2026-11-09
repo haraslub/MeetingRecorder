@@ -22,7 +22,8 @@ from PyQt6.QtWidgets import (
 
 from audiorecorder.recordings.manager import SLIDES
 from audiorecorder.ui import icons, theme
-from audiorecorder.ui.widgets import BusyBar, Chip, ElidedLabel, fade, set_prop, spaced
+from audiorecorder.ui.recording_name import RecordingName
+from audiorecorder.ui.widgets import BusyBar, Chip, fade, set_prop, spaced
 
 BADGES = (
     (".md", "file-text", "Transcript"),
@@ -52,6 +53,7 @@ def format_duration(seconds):
 
 
 class RecordingItemWidget(QFrame):
+    rename_requested = pyqtSignal(str, str)
     play_clicked = pyqtSignal(str)
     stop_clicked = pyqtSignal(str)
     transcribe_clicked = pyqtSignal(str)
@@ -94,9 +96,10 @@ class RecordingItemWidget(QFrame):
         center.setSpacing(6)
         top = QHBoxLayout()
         top.setSpacing(12)
-        self._name_label = ElidedLabel(self.recording.name)
-        self._name_label.setObjectName("name")
-        top.addWidget(self._name_label, 1)
+        self._name = RecordingName(self.recording.name)
+        self._name.rename_requested.connect(
+            lambda name: self.rename_requested.emit(self.recording.path, name))
+        top.addWidget(self._name, 1)
         self._duration_label = QLabel(format_duration(self.recording.duration_seconds))
         self._duration_label.setObjectName("duration")
         top.addWidget(self._duration_label)
@@ -177,6 +180,7 @@ class RecordingItemWidget(QFrame):
     def set_processing(self, message, busy, kind=None):
         self._message = message
         self._busy = busy
+        self._name.set_busy(busy)
         if kind is not None:
             self._kind = kind
         self._render()
@@ -321,6 +325,7 @@ class RecordingItemWidget(QFrame):
 
 
 class RecordingListWidget(QWidget):
+    rename_requested = pyqtSignal(str, str)
     play_requested = pyqtSignal(str)
     stop_requested = pyqtSignal(str)
     transcribe_requested = pyqtSignal(str)
@@ -425,37 +430,56 @@ class RecordingListWidget(QWidget):
             self._player.setParent(self)
 
     def set_recordings(self, recordings):
+        # Keep unchanged rows (and their focused editors) when another recording changes.
+        previous = {widget.recording.path: widget for widget in self._item_widgets}
+        current = {rec.path: rec for rec in recordings}
         self._park_player()
         for widget in self._item_widgets:
-            widget.setParent(None)
-            widget.deleteLater()
+            if current.get(widget.recording.path) != widget.recording:
+                widget.setParent(None)
+                widget.deleteLater()
+                previous.pop(widget.recording.path)
         self._item_widgets = []
         self._empty.setVisible(not recordings)
         self._count.setText(str(len(recordings)) if recordings else "")
 
-        for rec in recordings:
-            item_widget = RecordingItemWidget(rec)
-            if rec.path in self._processing_states:
-                item_widget.set_processing(*self._processing_states[rec.path])
-            if rec.path in self._failures:
-                item_widget.set_failure(self._failures[rec.path])
-            item_widget.play_clicked.connect(self.play_requested.emit)
-            item_widget.stop_clicked.connect(self.stop_requested.emit)
-            item_widget.transcribe_clicked.connect(self.transcribe_requested.emit)
-            item_widget.cleanup_clicked.connect(self.cleanup_requested.emit)
-            item_widget.move_clicked.connect(self.move_requested.emit)
-            item_widget.delete_clicked.connect(self.delete_requested.emit)
-            item_widget.open_transcript_clicked.connect(self.open_transcript_requested.emit)
-            item_widget.open_folder_clicked.connect(self.open_folder_requested.emit)
-            item_widget.copy_folder_name_clicked.connect(self.copy_folder_name_requested.emit)
-            item_widget.details_clicked.connect(self.details_requested.emit)
-            self._rows_layout.insertWidget(self._rows_layout.count() - 1, item_widget)
+        for index, rec in enumerate(recordings, start=1):
+            item_widget = previous.get(rec.path)
+            if item_widget is None:
+                item_widget = RecordingItemWidget(rec)
+                item_widget.play_clicked.connect(self.play_requested.emit)
+                item_widget.stop_clicked.connect(self.stop_requested.emit)
+                item_widget.transcribe_clicked.connect(self.transcribe_requested.emit)
+                item_widget.cleanup_clicked.connect(self.cleanup_requested.emit)
+                item_widget.move_clicked.connect(self.move_requested.emit)
+                item_widget.delete_clicked.connect(self.delete_requested.emit)
+                item_widget.open_transcript_clicked.connect(self.open_transcript_requested.emit)
+                item_widget.open_folder_clicked.connect(self.open_folder_requested.emit)
+                item_widget.copy_folder_name_clicked.connect(self.copy_folder_name_requested.emit)
+                item_widget.details_clicked.connect(self.details_requested.emit)
+                item_widget.rename_requested.connect(self.rename_requested.emit)
+            item_widget.set_processing(*self._processing_states.get(rec.path, ("", False, None)))
+            item_widget.set_failure(self._failures.get(rec.path))
+            if self._rows_layout.itemAt(index).widget() is not item_widget:
+                self._rows_layout.insertWidget(index, item_widget)
             self._item_widgets.append(item_widget)
             if rec.path == self._playing_path:
                 item_widget.set_playing(True)
                 if self._player is not None:
                     item_widget.attach_player(self._player)
         self._update_queue_note()
+
+    def set_rename_error(self, path, message):
+        for widget in self._item_widgets:
+            if widget.recording.path == path:
+                widget._name.show_error(message)
+                break
+
+    def recording_renamed(self, previous, current):
+        """Keep retry/error state attached to the files after a successful rename."""
+        for states in (self._processing_states, self._failures):
+            if previous in states:
+                states[current] = states.pop(previous)
 
     def set_processing(self, path, message, busy, kind=None):
         if message:

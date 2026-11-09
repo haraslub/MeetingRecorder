@@ -64,6 +64,28 @@ transcription locks of both paths held, restores what moved when a file fails, t
 old folder if it is empty. Files a person added to the folder stay in the old folder. Delete
 removes the M4A, the sidecars, the snapshots and `slides.md`, then the folder if it is empty.
 
+**Inline rename.** Click the name in a saved recording's row to edit the full name in place.
+Keyboard users can focus the name and press Enter, Space or F2. Enter saves; Escape or moving
+focus to another control cancels. Switching applications keeps the draft. An unchanged name
+does nothing. The extension is not shown in the
+editor. A successful rename updates the folder, audio and side files together and highlights
+the updated row. Playback of that recording stops before moving its files.
+
+`ui/recording_name.py` owns editing and inline errors. `RecordingListWidget` forwards the
+path and proposed name to `MainWindow.rename_recording`, which checks the processing state
+and uses the existing manager transfer. Unchanged rows are reused during library refreshes,
+so completion of another recording does not discard the draft, cursor or error message.
+Processing disables editing; if processing begins during an edit, the draft is cancelled.
+Filesystem failures and conflicts preserve the original files and leave the attempted name
+in the editor for correction. A removed or changed row is rebuilt from disk.
+
+Both the UI and API use `recordings.naming.recording_name`. The manager validates again before
+any filesystem change. It trims outer spaces and rejects empty names, leading/trailing dots,
+path separators, control characters, Windows-invalid characters and reserved device names.
+This prevents a renamed recording from disappearing from the library as a hidden file or
+escaping its folder. Existing files and folders are never overwritten. A case-only rename
+can be refused as an existing folder on a filesystem that ignores case.
+
 **Migration.** `MainWindow.__init__` calls `RecordingManager.migrate` before the first list.
 Each M4A directly in the output folder (hidden staging files excluded) moves into its own
 folder: `Recording 2026-11-04 10-00-00 1a2b3c4d` becomes `2026-11-04 10-00-00`, other names
@@ -88,5 +110,8 @@ transcription, stays and is tried again at the next start; the status bar names 
 move of a whole folder, a taken target folder, added files in the old folder, rename, delete
 with and without added files, and the migration with old slides and a locked recording.
 `tests/test_recording_menu.py` covers **Open folder**, **Copy folder name** and the Slides badge.
+`tests/test_inline_rename.py` exercises mouse and keyboard editing, cancellation, errors and
+correction, busy guards, Unicode names, all side files and drafts across library refreshes.
+The folder and API tests also enforce the shared filename rules.
 `tests/test_slides_toggle.py` covers a recording named after the Teams window title with its
 snapshots in the folder; `tests/test_session_recovery.py` covers the recovered folder.

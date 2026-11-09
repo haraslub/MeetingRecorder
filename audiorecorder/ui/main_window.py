@@ -585,6 +585,7 @@ class MainWindow(QMainWindow):
 
         # --- Recording list, with the player inside the row that plays ---
         self._recording_list = RecordingListWidget()
+        self._recording_list.rename_requested.connect(self._rename_recording)
         self._recording_list.play_requested.connect(self._play_recording)
         self._recording_list.stop_requested.connect(self._stop_recording_playback)
         self._recording_list.transcribe_requested.connect(self._transcribe_recording)
@@ -1344,10 +1345,22 @@ class MainWindow(QMainWindow):
 
     def rename_recording(self, path, name):
         """Rename the recording, its files and its folder; the new audio path."""
+        if self.recording_busy(path) is not None:
+            raise RuntimeError("Wait for processing to finish before renaming.")
         self._release_playback(path)
         renamed = self._manager.rename(path, name)
+        self._recording_list.recording_renamed(path, renamed)
         self._refresh_list()
         return renamed
+
+    def _rename_recording(self, path, name):
+        try:
+            renamed = self.rename_recording(path, name)
+        except (OSError, ValueError, RuntimeError) as error:
+            self._recording_list.set_rename_error(path, str(error))
+            return
+        self._recording_list.highlight_path(renamed)
+        self._status_bar.showMessage(f"Renamed to {os.path.basename(renamed)[:-4]}", 5000)
 
     def delete_recording(self, path):
         self._release_playback(path)

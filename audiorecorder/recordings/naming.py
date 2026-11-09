@@ -19,6 +19,21 @@ _GENERIC = {
 _NOT_IN_NAMES = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
+def recording_name(value):
+    """Validate a user-entered name on every platform, before touching any files."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("Enter a recording name.")
+    name = value.strip()
+    if name.startswith(".") or name.endswith(".") or _NOT_IN_NAMES.search(name):
+        raise ValueError('Use a name without a leading/trailing dot or <>:"/\\|?* characters.')
+    # Windows reserves these names even with an extension (for example CON.m4a).
+    stem = name.split(".", 1)[0].rstrip(" ").upper()
+    if stem in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} or re.fullmatch(
+            r"(?:COM|LPT)[1-9¹²³]", stem):
+        raise ValueError("This name is reserved by Windows. Choose another name.")
+    return name
+
+
 def meeting_title(raw):
     """The meeting subject inside a window or tab title, cleaned for a folder name, or ''."""
     title = _BROWSER.sub("", (raw or "").strip())

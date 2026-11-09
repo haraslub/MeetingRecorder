@@ -298,6 +298,9 @@ transcript files it gets back. The API listens on `127.0.0.1` only and needs a t
 
 ![Settings, AI agents tab](docs/screenshots/settings-ai-agents.png)
 
+Click a saved recording's name to rename it. Press **Enter** to save, or **Escape** to cancel.
+The folder, audio and side files rename together. Recordings being processed cannot be renamed.
+
 ## Settings
 
 Open Settings with the gear icon. **OK** saves, **Cancel** discards. The General tab is what

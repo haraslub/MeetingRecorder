@@ -35,6 +35,10 @@ and say in the release notes what was not exercised.
 - [ ] Set the system source to "None (microphone only)": the status bar says the recording
       is microphone only, and the result contains just your voice
 - [ ] Pick a specific loopback device by name, restart the app, and confirm it is still selected
+- [ ] Click a recording name: the full name is selected. Enter saves the folder, audio and
+      side-file names; Escape and clicking elsewhere cancel. A conflicting or invalid name
+      shows an inline error and can be corrected. Processing blocks renaming. Tab to a name
+      and use Enter or F2 to edit it. A different recording finishing does not lose the draft.
 - [ ] Transcribe a short recording: a `.md` appears with speakers and timestamps
 - [ ] With language `cs` and translation on, transcribe an English recording and confirm the
       Czech translation comes first and the English original follows

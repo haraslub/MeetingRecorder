@@ -10,7 +10,7 @@ from pathlib import Path
 import av
 
 from audiorecorder.recordings.journal import journal_for_capture
-from audiorecorder.recordings.naming import folder_name
+from audiorecorder.recordings.naming import folder_name, recording_name
 from audiorecorder.slides.store import INDEX as SLIDES_INDEX
 from audiorecorder.slides.store import LEGACY_INDEX, LEGACY_SUFFIX, snapshot_files
 from audiorecorder.slides.store import TEMP_PREFIX as SLIDES_PREFIX
@@ -228,6 +228,7 @@ class RecordingManager:
                 folder.rmdir()
 
     def rename(self, recording_path, new_name):
+        new_name = recording_name(new_name)
         recording = Path(recording_path)
         if self._folder(recording) is None:
             return self._transfer(recording, recording.with_name(f"{new_name}.m4a"))

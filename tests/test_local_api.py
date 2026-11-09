@@ -284,6 +284,14 @@ def test_a_busy_recording_is_neither_processed_nor_changed(control):
     control.window._busy_kinds.clear()
 
 
+@pytest.mark.parametrize("name", ["", "../escape", ".hidden", "CON", "NUL.txt", "LPT1"])
+def test_api_rename_uses_the_shared_filename_rules(control, name):
+    audio = add_recording(control.window.config["output_dir"], "Original")
+    assert refused(control.call, "POST", "/v1/recordings/rename",
+                   {"recording": "Original", "name": name}) == (400, "bad_request")
+    assert audio.exists()
+
+
 def test_transcription_and_summary_explain_what_is_missing(control, monkeypatch):
     add_recording(control.window.config["output_dir"], "Plain")
     monkeypatch.setattr(rts.mw.secrets, "get_api_key", lambda: None)
