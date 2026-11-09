@@ -85,29 +85,28 @@ class TestDelete:
 
 
 class TestRename:
-    def test_renames_the_audio_and_its_transcript(self, tmp_path):
+    def test_rename_keeps_audio_and_transcript_paths(self, tmp_path):
         make_recording(tmp_path, "old", transcript=True)
         manager = RecordingManager(str(tmp_path))
 
         new_path = manager.rename(str(tmp_path / "old.m4a"), "new")
 
-        assert new_path.endswith("new.m4a")
-        assert (tmp_path / "new.m4a").exists()
-        assert (tmp_path / "new.md").exists()
-        assert not (tmp_path / "old.m4a").exists()
+        assert new_path.endswith("old.m4a")
+        assert (tmp_path / "old.m4a").exists()
+        assert (tmp_path / "old.md").exists()
+        assert manager.scan()[0].name == "new"
 
     def test_recording_without_a_transcript(self, tmp_path):
         make_recording(tmp_path, "old")
         RecordingManager(str(tmp_path)).rename(str(tmp_path / "old.m4a"), "new")
-        assert (tmp_path / "new.m4a").exists()
+        assert (tmp_path / "old.m4a").exists()
 
-    def test_refuses_to_overwrite(self, tmp_path):
+    def test_duplicate_display_names_do_not_overwrite_audio(self, tmp_path):
         make_recording(tmp_path, "one")
         make_recording(tmp_path, "two")
         manager = RecordingManager(str(tmp_path))
 
-        with pytest.raises(FileExistsError):
-            manager.rename(str(tmp_path / "one.m4a"), "two")
+        manager.rename(str(tmp_path / "one.m4a"), "two")
 
         assert (tmp_path / "one.m4a").exists()
 
@@ -130,7 +129,7 @@ def test_scan_shows_recoverable_or_uncertain_job(tmp_path, stage, label):
     assert label in recording.transcription_status
 
 
-@pytest.mark.parametrize('action', ['delete', 'rename', 'move'])
+@pytest.mark.parametrize('action', ['delete', 'move'])
 def test_file_operations_refuse_a_transcription_owned_by_another_worker(tmp_path, action):
     from audiorecorder.transcription.jobs import TranscriptionJob
 
@@ -142,8 +141,6 @@ def test_file_operations_refuse_a_transcription_owned_by_another_worker(tmp_path
     with TranscriptionJob(audio).locked(), pytest.raises(RuntimeError, match='another process'):
         if action == 'delete':
             manager.delete(str(audio))
-        elif action == 'rename':
-            manager.rename(str(audio), 'renamed')
         else:
             manager.move(str(audio), str(destination))
     assert audio.read_bytes() == b'not really audio'
@@ -204,24 +201,20 @@ def test_scan_corrupt_checkpoint_is_actionable_and_does_not_crash(tmp_path):
     assert recording.transcription_status == 'Job state unreadable — review before retrying'
 
 
-@pytest.mark.parametrize('action', ['rename', 'move'])
-def test_transfer_cannot_overwrite_destination_with_active_transcription(tmp_path, action):
+def test_transfer_cannot_overwrite_destination_with_active_transcription(tmp_path):
     from audiorecorder.transcription.jobs import TranscriptionJob
 
     make_recording(tmp_path, 'meeting', transcript=True)
     source = tmp_path / 'meeting.m4a'
     destination = tmp_path / 'destination'
     destination.mkdir()
-    target = tmp_path / 'renamed.m4a' if action == 'rename' else destination / source.name
+    target = destination / source.name
     with (
         TranscriptionJob(target).locked(),
         pytest.raises(RuntimeError, match='another process'),
     ):
         manager = RecordingManager(str(tmp_path))
-        if action == 'rename':
-            manager.rename(str(source), target.stem)
-        else:
-            manager.move(str(source), str(destination))
+        manager.move(str(source), str(destination))
     assert source.exists()
     assert source.with_suffix('.md').exists()
     assert not target.exists()
@@ -235,7 +228,8 @@ def test_delete_and_rename_leave_no_lock_files(tmp_path):
     manager.rename(str(tmp_path / "kept.m4a"), "renamed")
     manager.delete(str(tmp_path / "gone.m4a"))
 
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["renamed.m4a", "renamed.md"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "kept.m4a", "kept.md", "kept.recording.json"]
 
 
 def test_move_takes_the_slides_folder_along(tmp_path):

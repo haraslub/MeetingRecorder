@@ -5,8 +5,6 @@ not do is appear when nothing was recognised, or get left behind when the record
 belongs to is renamed, moved or deleted.
 """
 
-import pytest
-
 from audiorecorder.recordings.manager import SIDECAR_SUFFIXES, RecordingManager, sidecars
 from audiorecorder.subtitles.document import (
     live_transcript_path,
@@ -83,6 +81,8 @@ class TestSidecars:
             if suffix == ".slides":
                 (directory / f"{stem}{suffix}").mkdir()
                 (directory / f"{stem}{suffix}" / "0001 00-00-04.jpg").write_bytes(b"jpeg")
+            elif suffix == ".recording.json":
+                (directory / f"{stem}{suffix}").write_text('{"display_name":"Old title"}')
             else:
                 (directory / f"{stem}{suffix}").write_text("x", encoding="utf-8")
         return str(directory / f"{stem}.m4a")
@@ -91,7 +91,8 @@ class TestSidecars:
         recording = self.make(tmp_path, "call", SIDECAR_SUFFIXES)
         assert {p.name for p in sidecars(recording)} == {
             "call.md", "call.summary.md", "call.live.md",
-            "call.speakers.md", "call.speakers.json", "call.transcription.json"}
+            "call.speakers.md", "call.speakers.json", "call.transcription.json",
+            "call.recording.json"}
 
     def test_missing_sidecars_are_not_invented(self, tmp_path):
         recording = self.make(tmp_path, "call", [".md"])
@@ -105,26 +106,27 @@ class TestSidecars:
 
         assert not [p for p in tmp_path.iterdir() if p.suffix != ".lock"]
 
-    def test_rename_takes_all_of_them(self, tmp_path):
+    def test_rename_leaves_all_sidecar_paths_unchanged(self, tmp_path):
         recording = self.make(tmp_path, "old", SIDECAR_SUFFIXES)
 
         RecordingManager(str(tmp_path)).rename(recording, "new")
 
         assert {p.name for p in tmp_path.iterdir() if p.suffix != ".lock"} == {
-            "new.m4a", "new.md", "new.summary.md", "new.live.md",
-            "new.speakers.md", "new.speakers.json", "new.transcription.json"}
+            "old.m4a", "old.md", "old.summary.md", "old.live.md",
+            "old.speakers.md", "old.speakers.json", "old.transcription.json",
+            "old.recording.json"}
 
     def test_rename_keeps_the_compound_suffixes_intact(self, tmp_path):
         recording = self.make(tmp_path, "old", [".summary.md", ".live.md"])
 
         RecordingManager(str(tmp_path)).rename(recording, "new")
 
-        assert (tmp_path / "new.summary.md").exists()
-        assert (tmp_path / "new.live.md").exists()
+        assert (tmp_path / "old.summary.md").exists()
+        assert (tmp_path / "old.live.md").exists()
 
-    def test_rename_still_refuses_to_overwrite(self, tmp_path):
+    def test_rename_never_overwrites_another_recording(self, tmp_path):
         self.make(tmp_path, "one", [])
         self.make(tmp_path, "two", [])
 
-        with pytest.raises(FileExistsError):
-            RecordingManager(str(tmp_path)).rename(str(tmp_path / "one.m4a"), "two")
+        RecordingManager(str(tmp_path)).rename(str(tmp_path / "one.m4a"), "two")
+        assert (tmp_path / "one.m4a").exists() and (tmp_path / "two.m4a").exists()

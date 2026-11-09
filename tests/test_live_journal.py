@@ -39,7 +39,8 @@ def test_a_missing_or_damaged_journal_gives_nothing(tmp_path):
 
 
 @pytest.mark.parametrize("name,expected", [("Chosen name", "Chosen name"),
-                                         ("../escape", None), (".hidden", None), (123, None)])
+                                         ("../escape", "../escape"), (".hidden", ".hidden"),
+                                         (123, None), ("a\nb", None)])
 def test_custom_names_are_validated_when_recovered(tmp_path, name, expected):
     path = journal.journal_path(tmp_path, "name")
     journal.save(path, journal.encode("Weekly sync", None, None, name=name))
@@ -50,6 +51,8 @@ def test_an_old_journal_without_a_custom_name_still_loads(tmp_path):
     path = journal.journal_path(tmp_path, "old")
     path.write_text(json.dumps({"title": "Weekly", "subtitles": [SUBTITLES, "cs"]}))
     assert journal.load(path) == ("Weekly", (SUBTITLES, "cs"), None, None)
+    path.write_text('{"title":"Weekly","name":"Legacy custom name"}')
+    assert journal.load(path) == ("Weekly", None, None, "Legacy custom name")
 
 
 def test_a_capture_set_aside_keeps_its_journal(tmp_path):
@@ -108,11 +111,15 @@ def test_start_up_recovery_restores_title_and_live_subtitles(tmp_path, custom_na
         assert len(folders) == 1, folders
         folder = folders[0]
         expected_name = {custom_name!r}
-        assert (folder.name == expected_name if expected_name else
-                folder.name.endswith(' - Weekly sync')), folder.name
+        assert folder.name.endswith(' - Weekly sync'), folder.name
+        if expected_name:
+            from audiorecorder.recordings.metadata import get_display_name
+            assert get_display_name(folder / (folder.name + '.m4a')) == expected_name
         files = sorted(path.name for path in folder.iterdir())
-        assert files == sorted(folder.name + suffix for suffix in (
-            '.m4a', '.live.md', '.speakers.md', '.speakers.json')), files
+        suffixes = ['.m4a', '.live.md', '.speakers.md', '.speakers.json']
+        if expected_name:
+            suffixes.append('.recording.json')
+        assert files == sorted(folder.name + suffix for suffix in suffixes), files
         assert 'Ahoj' in (folder / (folder.name + '.live.md')).read_text(encoding='utf-8')
         assert not [path for path in directory.iterdir() if path.name.startswith('_rec_')]
     """, tmp_path)

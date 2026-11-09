@@ -14,7 +14,7 @@ from audiorecorder import secrets
 from audiorecorder.api.server import ApiError
 from audiorecorder.config import save_config
 from audiorecorder.recordings.manager import SLIDES, RecordingManager
-from audiorecorder.recordings.naming import recording_name
+from audiorecorder.recordings.naming import display_name
 from audiorecorder.slides.store import INDEX as SLIDES_INDEX
 from audiorecorder.slides.store import LEGACY_SUFFIX
 from audiorecorder.subtitles.speaker_document import resolve_speaker
@@ -255,10 +255,9 @@ class RemoteControl:
     def rename(self, query, body):
         recording = self._find(body.get("recording"))
         try:
-            name = recording_name(body.get("name"))
+            name = display_name(body.get("name"))
         except ValueError as error:
             raise ApiError(400, "bad_request", str(error)) from None
-        self._refuse_busy(recording)
         path = self._transfer(lambda: self._window.rename_recording(recording.path, name))
         return {"recording": self._describe(self._find(path))}
 

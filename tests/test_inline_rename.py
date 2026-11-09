@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget
 from test_recording_folders import make_folder_recording
 from test_rts_toggle import app, window
 
+from audiorecorder.recordings import metadata
 from audiorecorder.recordings.manager import RecordingManager
 from audiorecorder.ui.recording_list import RecordingListWidget
 from audiorecorder.ui.recording_name import RecordingName
@@ -91,8 +92,7 @@ def test_switching_apps_keeps_the_draft(app):
     field.close()
 
 
-@pytest.mark.parametrize("name", ["", "  ", "../outside", ".hidden", "Bad/Name", "Bad\\Name",
-                                  "Bad:Name", "Trailing.", "CON", "nul.txt", "LPT1", "COM¹"])
+@pytest.mark.parametrize("name", ["", "  ", "bad\nname", "bad\x00name", "x" * 201])
 def test_invalid_names_stay_editable_and_never_touch_files(window, name):
     w = window(rts_translate=False)
     audio = make_folder_recording(Path(w.config["output_dir"]))
@@ -106,7 +106,7 @@ def test_invalid_names_stay_editable_and_never_touch_files(window, name):
     assert audio.exists()
 
 
-def test_inline_rename_updates_audio_sidecars_folder_and_row(window):
+def test_inline_rename_changes_only_metadata_and_row(window):
     w = window(rts_translate=False)
     output = Path(w.config["output_dir"])
     old = make_folder_recording(output)
@@ -115,19 +115,17 @@ def test_inline_rename_updates_audio_sidecars_folder_and_row(window):
         old.with_suffix(suffix).write_text("payload")
     w._refresh_list()
     show(w)
-    edit(w._recording_list._item_widgets[0]._name, "Rozpočet – 日本語")
-    new = output / "Rozpočet – 日本語" / "Rozpočet – 日本語.m4a"
-    assert new.exists() and not old.exists()
-    for suffix in (".md", ".summary.md", ".live.md", ".speakers.json", ".transcription.json"):
-        assert new.with_suffix(suffix).exists()
-    assert (new.parent / "slides.md").exists()
-    assert (new.parent / "0001 00-00-04.jpg").exists()
+    before = {p.name: p.read_bytes() for p in old.parent.iterdir()}
+    edit(w._recording_list._item_widgets[0]._name, "Rozpočet: 日本語 / slides")
+    assert old.exists()
+    assert {p.name: p.read_bytes() for p in old.parent.iterdir() if p.name in before} == before
     row = w._recording_list._item_widgets[0]
-    assert row.recording.path == str(new)
-    assert row._name.label.text() == "Rozpočet – 日本語"
+    assert row.recording.path == str(old)
+    assert row._name.label.text() == "Rozpočet: 日本語 / slides"
+    assert metadata.get_display_name(old) == row.recording.name
 
 
-def test_conflict_keeps_draft_for_correction_without_overwriting(window):
+def test_duplicate_display_names_do_not_conflict_or_overwrite(window):
     w = window(rts_translate=False)
     output = Path(w.config["output_dir"])
     old = make_folder_recording(output)
@@ -136,33 +134,26 @@ def test_conflict_keeps_draft_for_correction_without_overwriting(window):
     show(w)
     row = next(r for r in w._recording_list._item_widgets if r.recording.path == str(old))
     edit(row._name, "Existing")
-    assert row._name.error.isVisible()
-    assert row._name.editor.text() == "Existing"
     assert old.exists() and other.exists()
-    row._name.editor.setText("Corrected")
-    QTest.keyClick(row._name.editor, Qt.Key.Key_Return)
-    assert (output / "Corrected" / "Corrected.m4a").exists()
+    assert metadata.get_display_name(old) == metadata.get_display_name(other) == "Existing"
 
 
-def test_busy_recordings_cannot_begin_or_commit_rename(window):
+def test_busy_recordings_can_change_their_display_names(window):
     w = window(rts_translate=False)
     old = make_folder_recording(Path(w.config["output_dir"]))
     w._refresh_list()
     show(w)
     row = w._recording_list._item_widgets[0]
-    row.set_processing("Uploading", True, "transcribe")
+    w._recording_list.set_processing(str(old), "Uploading", True, "transcribe")
     QTest.mouseClick(row._name.label, Qt.MouseButton.LeftButton)
-    assert not row._name._editing
-    row.set_processing("", False)
-    row._name.begin()
+    assert row._name._editing
     row._name.editor.setText("Draft")
     w._busy_paths.add(str(old))
     w._busy_kinds[str(old)] = "transcribe"
     QTest.keyClick(row._name.editor, Qt.Key.Key_Return)
     assert old.exists()
-    assert "processing" in row._name.error.text()
-    row.set_processing("Queued", True, "transcribe")
-    assert not row._name._editing
+    assert metadata.get_display_name(old) == "Draft"
+    assert w._recording_list._item_widgets[0]._busy
     w._busy_paths.clear()
 
 
@@ -221,7 +212,7 @@ def test_failed_rename_keeps_name_and_files(window, monkeypatch):
     assert audio.exists()
 
 
-def test_rename_stops_playback_before_moving_the_audio(window, monkeypatch):
+def test_rename_does_not_stop_playback_or_move_audio(window, monkeypatch):
     w = window(rts_translate=False)
     audio = make_folder_recording(Path(w.config["output_dir"]))
     w._refresh_list()
@@ -229,15 +220,10 @@ def test_rename_stops_playback_before_moving_the_audio(window, monkeypatch):
     w._player._current_path = str(audio)
     stopped = []
     monkeypatch.setattr(w._player, "stop_playback", lambda: stopped.append(True))
-    original = w._manager.rename
-
-    def rename(path, name):
-        assert stopped == [True]
-        return original(path, name)
-
-    monkeypatch.setattr(w._manager, "rename", rename)
-    edit(w._recording_list._item_widgets[0]._name, "Playback stopped")
-    assert not audio.exists()
+    edit(w._recording_list._item_widgets[0]._name, "Playback continues")
+    assert audio.exists()
+    assert stopped == []
+    assert w._player.current_path == str(audio)
 
 
 def test_rename_keeps_failed_job_details_and_retry_target(window):
@@ -250,7 +236,7 @@ def test_rename_keeps_failed_job_details_and_retry_target(window):
     edit(w._recording_list._item_widgets[0]._name, "Retry here")
     row = w._recording_list._item_widgets[0]
     assert w.recording_failure(row.recording.path) == ("cleanup", error)
-    assert w.recording_failure(str(audio)) is None
+    assert row.recording.path == str(audio)
     assert row._primary.text().strip() == "Retry"
     requested = []
     row.cleanup_clicked.disconnect()  # Observe routing without launching a real cleanup job.

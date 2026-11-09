@@ -26,17 +26,18 @@ def test_the_menu_opens_the_folder_and_copies_its_name(app):
     widget = row()
     opened, copied = [], []
     widget.open_folder_clicked.connect(opened.append)
-    widget.copy_folder_name_clicked.connect(copied.append)
+    widget.copy_name_clicked.connect(copied.append)
 
     menu = actions(widget)
-    assert list(menu)[:3] == ["Clean up with AI…", "Open folder", "Copy folder name"]
+    assert list(menu)[:3] == ["Clean up with AI…", "Open folder", "Copy recording name"]
     menu["Open folder"].trigger()
-    menu["Copy folder name"].trigger()
+    menu["Copy recording name"].trigger()
 
-    assert opened == copied == ["Q:/out/2026-11-04 10-00-00 - Weekly sync"]
+    assert opened == ["Q:/out/2026-11-04 10-00-00 - Weekly sync"]
+    assert copied == [widget.recording.name]
 
 
-def test_a_recording_without_a_folder_opens_its_directory_and_cannot_copy(app):
+def test_a_recording_without_a_folder_can_copy_its_display_name(app):
     widget = row(folder="")
     opened = []
     widget.open_folder_clicked.connect(opened.append)
@@ -45,7 +46,7 @@ def test_a_recording_without_a_folder_opens_its_directory_and_cannot_copy(app):
     menu["Open folder"].trigger()
 
     assert opened == ["Q:/out"]
-    assert not menu["Copy folder name"].isEnabled()
+    assert menu["Copy recording name"].isEnabled()
 
 
 def test_the_slides_badge_opens_the_recording_folder(app):
@@ -59,7 +60,7 @@ def test_the_slides_badge_opens_the_recording_folder(app):
     assert opened == ["Q:/out/2026-11-04 10-00-00 - Weekly sync"]
 
 
-def test_copy_folder_name_puts_only_the_name_on_the_clipboard(window):
+def test_copy_recording_name_puts_the_display_name_on_the_clipboard(window):
     w = window(rts_translate=False)
-    w._copy_folder_name("Q:/out/2026-11-04 10-00-00 - Weekly sync")
-    assert QGuiApplication.clipboard().text() == "2026-11-04 10-00-00 - Weekly sync"
+    w._copy_recording_name("Q4: budget / plan")
+    assert QGuiApplication.clipboard().text() == "Q4: budget / plan"

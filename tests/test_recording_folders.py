@@ -65,15 +65,6 @@ def test_a_new_recording_gets_its_own_folder_and_a_free_name(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == [NAME]
 
 
-@pytest.mark.parametrize("name", ["../escape", ".hidden", "", "CON", "x" * 201,
-                                  "🎙" * 51, "bad\ud800name"])
-def test_custom_capture_name_is_validated_before_creating_the_output_directory(tmp_path, name):
-    output = tmp_path / "not-created"
-    with pytest.raises(ValueError):
-        new_recording_path(output, STARTED, name=name)
-    assert not output.exists()
-
-
 def test_scan_lists_folder_recordings_with_their_folder_and_slides(tmp_path):
     audio = make_folder_recording(tmp_path)
     (tmp_path / "loose.m4a").write_bytes(b"audio")
@@ -129,19 +120,19 @@ def test_move_keeps_files_a_person_added_in_the_old_folder(tmp_path):
     assert sorted(p.name for p in (output / NAME).iterdir()) == ["notes.txt"]
 
 
-def test_rename_renames_the_folder_with_the_files(tmp_path):
+def test_rename_preserves_the_folder_and_all_files(tmp_path):
     audio = make_folder_recording(tmp_path)
 
     renamed = RecordingManager(str(tmp_path)).rename(str(audio), "Budget")
 
-    assert renamed == str(tmp_path / "Budget" / "Budget.m4a")
-    assert sorted(p.name for p in (tmp_path / "Budget").iterdir()) == [
-        "0001 00-00-04.jpg", "Budget.m4a", "Budget.md", "Budget.summary.md", "slides.md"]
-    assert not (tmp_path / NAME).exists()
+    assert renamed == str(audio)
+    assert RecordingManager(str(tmp_path)).scan()[0].name == "Budget"
+    assert audio.exists() and audio.with_suffix(".md").exists()
+    assert (audio.parent / "slides.md").exists()
+    assert not (tmp_path / "Budget").exists()
 
 
-@pytest.mark.parametrize("name", ["", "..", "../escape", ".hidden", "a/b", "a\\b", "a:",
-                                  "a\x00b", "a.", "CON", "nul.txt", "LPT9"])
+@pytest.mark.parametrize("name", ["", "a\x00b", "a\nb", "x" * 201])
 def test_rename_rejects_unsafe_names_before_creating_files(tmp_path, name):
     audio = make_folder_recording(tmp_path)
     before = sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*"))
@@ -157,8 +148,9 @@ def test_rename_same_name_is_a_noop_and_loose_recordings_are_supported(tmp_path)
     manager = RecordingManager(str(tmp_path))
     assert manager.rename(str(audio), " Old ") == str(audio)
     new = manager.rename(str(audio), "New")
-    assert new == str(tmp_path / "New.m4a")
-    assert (tmp_path / "New.md").read_text() == "transcript"
+    assert new == str(audio)
+    assert audio.with_suffix(".md").read_text() == "transcript"
+    assert manager.scan()[0].name == "New"
 
 
 def test_delete_removes_the_folder_with_everything_the_app_wrote(tmp_path):

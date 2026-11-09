@@ -9,8 +9,9 @@ from pathlib import Path
 
 import av
 
+from audiorecorder.recordings import metadata
 from audiorecorder.recordings.journal import journal_for_capture
-from audiorecorder.recordings.naming import folder_name, recording_name
+from audiorecorder.recordings.naming import folder_name
 from audiorecorder.slides.store import INDEX as SLIDES_INDEX
 from audiorecorder.slides.store import LEGACY_INDEX, LEGACY_SUFFIX, snapshot_files
 from audiorecorder.slides.store import TEMP_PREFIX as SLIDES_PREFIX
@@ -23,7 +24,7 @@ log = logging.getLogger(__name__)
 # delete's idea left the summary behind.
 SIDECAR_SUFFIXES = (
     ".md", ".summary.md", ".live.md", ".speakers.md", ".speakers.json",
-    ".transcription.json",
+    ".transcription.json", metadata.SUFFIX,
 )
 # The side files a person reads, shown as badges on the recording.
 OUTPUT_SUFFIXES = (".md", ".summary.md", ".live.md", ".speakers.md")
@@ -60,11 +61,10 @@ def _free_name(directory, base):
     return name
 
 
-def new_recording_path(output_dir, started, title="", *, name=None):
+def new_recording_path(output_dir, started, title=""):
     """Create the folder of a new recording and return the path its M4A gets."""
-    base = recording_name(name) if name is not None else folder_name(started, title)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    name = _free_name(output_dir, base)
+    name = _free_name(output_dir, folder_name(started, title))
     folder = Path(output_dir) / name
     folder.mkdir()
     return str(folder / f"{name}.m4a")
@@ -108,7 +108,7 @@ class RecordingManager:
                 f.with_name(f.stem + LEGACY_SUFFIX).is_dir())
             recordings.append(Recording(
                 path=str(f),
-                name=f.stem,
+                name=metadata.get_display_name(f),
                 date=datetime.fromtimestamp(f.stat().st_mtime),
                 duration_seconds=self._get_duration(str(f)),
                 is_transcribed=transcript.exists(),
@@ -229,11 +229,8 @@ class RecordingManager:
                 folder.rmdir()
 
     def rename(self, recording_path, new_name):
-        new_name = recording_name(new_name)
-        recording = Path(recording_path)
-        if self._folder(recording) is None:
-            return self._transfer(recording, recording.with_name(f"{new_name}.m4a"))
-        return self._transfer(recording, recording.parent.parent / new_name / f"{new_name}.m4a")
+        """Change the display name while every filesystem path stays the same."""
+        return metadata.set_display_name(recording_path, new_name)
 
     def move(self, recording_path, destination):
         """Move the recording's folder, or a recording without a folder, into destination."""
@@ -324,6 +321,11 @@ class RecordingManager:
             locks.enter_context(TranscriptionJob(recording).locked())
             locks.enter_context(TranscriptionJob(target).locked())
             pairs = self._parts(recording, target)
+            # A fixed slide index must never alias a transcript during legacy migration.
+            for index in (0, 1):
+                keys = [str(pair[index].absolute()).casefold() for pair in pairs]
+                if len(set(keys)) != len(keys):
+                    raise ValueError("Recording files have conflicting names; nothing was moved.")
             for _, destination in pairs:
                 if destination.exists() or destination.is_symlink():
                     raise FileExistsError(f"File already exists: {destination}")

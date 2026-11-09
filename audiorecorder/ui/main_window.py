@@ -48,13 +48,13 @@ from audiorecorder.meetings.detection import (
 )
 from audiorecorder.meetings.microphone_use import create_microphone_monitor
 from audiorecorder.readiness import capture_readiness
-from audiorecorder.recordings import journal
+from audiorecorder.recordings import journal, metadata
 from audiorecorder.recordings.manager import (
     RecordingManager,
     new_recording_path,
     remove_empty_folder,
 )
-from audiorecorder.recordings.naming import folder_name, meeting_title, recording_name
+from audiorecorder.recordings.naming import display_name, folder_name, meeting_title
 from audiorecorder.slides.capture import SlideCapture
 from audiorecorder.slides.selector import SlideTuning
 from audiorecorder.slides.store import SlideFolder, finalize_folder
@@ -254,7 +254,7 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         # The subject of the meeting being recorded, which names its folder.
         self._meeting_title = ""
-        self._recording_name_override = None
+        self._recording_display_name = None
         # Notices the end of the meeting of a running recording; None while not recording.
         self._call_end = None
         self._call_end_prompt = None
@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
         self._recording_list.delete_requested.connect(self._delete_recording)
         self._recording_list.open_transcript_requested.connect(self._open_transcript)
         self._recording_list.open_folder_requested.connect(self._open_folder)
-        self._recording_list.copy_folder_name_requested.connect(self._copy_folder_name)
+        self._recording_list.copy_name_requested.connect(self._copy_recording_name)
         self._recording_list.details_requested.connect(self._show_processing_failure)
         self._recording_list.add_requested.connect(self._add_files)
         self._library_holder = QWidget()
@@ -826,7 +826,7 @@ class MainWindow(QMainWindow):
         self._recording_start_time = time.time()
         self._timer.start(200)
         self._meeting_title = ""
-        self._recording_name_override = None
+        self._recording_display_name = None
         self._journal_text = ""
         stamp = self._capture.capture_stamp
         self._journal_path = None if stamp is None else journal.journal_path(
@@ -955,13 +955,13 @@ class MainWindow(QMainWindow):
             capture_config = self._recording_config.pop(result.recording)
             output_path = new_recording_path(
                 capture_config["output_dir"],
-                datetime.fromtimestamp(self._recording_start_time), self._meeting_title,
-                name=self._recording_name_override)
+                datetime.fromtimestamp(self._recording_start_time), self._meeting_title)
             pending = {
                 "subtitles": self._finish_subtitles(),
                 "speakers": self._speaker_sidecar_payload(),
                 "slides": slides.path if slides is not None else None,
                 "journal": journal.journal_for_capture(mic_path),
+                "display_name": self._recording_display_name,
             }
             # The final state, for a crash before the encoder publishes the M4A.
             self._save_journal(
@@ -1031,12 +1031,13 @@ class MainWindow(QMainWindow):
         for system_path, mic_path, slides_path, started in self._manager.orphaned_captures():
             live_journal = journal.journal_for_capture(mic_path)
             title, subtitles, speakers, name = journal.load(live_journal)
-            output_path = new_recording_path(self.config["output_dir"], started, title, name=name)
+            output_path = new_recording_path(self.config["output_dir"], started, title)
             self._pending_sidecars[output_path] = {
                 "subtitles": subtitles,
                 "speakers": speakers,
                 "slides": slides_path,
                 "journal": live_journal,
+                "display_name": name,
             }
             self._enqueue_encoder(
                 system_path, mic_path, output_path, self.config,
@@ -1324,13 +1325,12 @@ class MainWindow(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
 
-    def _copy_folder_name(self, folder):
-        name = os.path.basename(folder)
+    def _copy_recording_name(self, name):
         QGuiApplication.clipboard().setText(name)
         self._status_bar.showMessage(f"Copied: {name}", 3000)
 
     def _sync_recording_name(self):
-        name = self._recording_name_override or folder_name(
+        name = self._recording_display_name or folder_name(
             datetime.fromtimestamp(self._recording_start_time), self._meeting_title)
         self._state_card.set_recording_name(name)
 
@@ -1340,11 +1340,11 @@ class MainWindow(QMainWindow):
             field.cancel()
             return
         try:
-            name = recording_name(name)
+            name = display_name(name)
         except ValueError as error:
             field.show_error(str(error))
             return
-        self._recording_name_override = name
+        self._recording_display_name = name
         self._sync_recording_name()
         field.cancel()
         field.label.setFocus()
@@ -1352,7 +1352,7 @@ class MainWindow(QMainWindow):
             self._save_journal(
                 self._journal_path, self._meeting_title, self._live_subtitle_payload(),
                 self._live_speaker_payload())
-        self._status_bar.showMessage(f"Recording will be saved as {name}", 5000)
+        self._status_bar.showMessage(f"Recording name: {name}", 5000)
 
     def recording_busy(self, path):
         """The kind of job queued or running for path ("transcribe", "cleanup"), else None."""
@@ -1375,12 +1375,8 @@ class MainWindow(QMainWindow):
         return moved
 
     def rename_recording(self, path, name):
-        """Rename the recording, its files and its folder; the new audio path."""
-        if self.recording_busy(path) is not None:
-            raise RuntimeError("Wait for processing to finish before renaming.")
-        self._release_playback(path)
+        """Update the display name without stopping playback or moving any files."""
         renamed = self._manager.rename(path, name)
-        self._recording_list.recording_renamed(path, renamed)
         self._refresh_list()
         return renamed
 
@@ -1391,7 +1387,7 @@ class MainWindow(QMainWindow):
             self._recording_list.set_rename_error(path, str(error))
             return
         self._recording_list.highlight_path(renamed)
-        self._status_bar.showMessage(f"Renamed to {os.path.basename(renamed)[:-4]}", 5000)
+        self._status_bar.showMessage(f"Renamed to {display_name(name)}", 5000)
 
     def delete_recording(self, path):
         self._release_playback(path)
@@ -1810,7 +1806,7 @@ class MainWindow(QMainWindow):
 
     def _save_journal(self, path, title, subtitles, speakers):
         """Write the live journal when it changed; a failure costs only the crash copy."""
-        text = journal.encode(title, subtitles, speakers, name=self._recording_name_override)
+        text = journal.encode(title, subtitles, speakers, name=self._recording_display_name)
         if text == self._journal_text:
             return
         try:
@@ -1853,6 +1849,16 @@ class MainWindow(QMainWindow):
         if pending is None:
             return []
         written = []
+        name_saved = True
+        if pending.get("display_name") is not None:
+            try:
+                metadata.set_display_name(recording_path, pending["display_name"])
+            except (OSError, ValueError) as error:
+                name_saved = False
+                log.exception("the recording display name could not be saved")
+                self._show_recording_error(
+                    "Audio saved, but its display name could not be saved",
+                    f"The audio is safe. Its name is retained in the live journal.\n{error}")
         subtitle_payload = pending.get("subtitles")
         if subtitle_payload:
             try:
@@ -1878,7 +1884,7 @@ class MainWindow(QMainWindow):
             except OSError:
                 log.exception("the slide snapshots could not be placed beside the recording")
         live_journal = pending.get("journal")
-        if live_journal is not None:
+        if live_journal is not None and name_saved:
             journal.remove(live_journal)
         return written
 

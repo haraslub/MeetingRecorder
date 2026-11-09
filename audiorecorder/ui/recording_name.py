@@ -3,7 +3,7 @@
 from PyQt6.QtCore import QEvent, Qt, pyqtSignal
 from PyQt6.QtWidgets import QLabel, QLineEdit, QStackedLayout, QVBoxLayout, QWidget
 
-from audiorecorder.recordings.naming import recording_name
+from audiorecorder.recordings.naming import display_name
 from audiorecorder.ui.widgets import ElidedLabel
 
 
@@ -91,7 +91,7 @@ class RecordingName(QWidget):
         if not self._editing or self._submitting or self._busy:
             return
         try:
-            name = recording_name(self.editor.text())
+            name = display_name(self.editor.text())
         except ValueError as error:
             self.show_error(str(error))
             return

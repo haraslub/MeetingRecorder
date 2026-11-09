@@ -19,25 +19,19 @@ _GENERIC = {
 _NOT_IN_NAMES = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
-def recording_name(value):
-    """Validate a user-entered name on every platform, before touching any files."""
+def display_name(value):
+    """A single-line UI title; punctuation has no filesystem meaning."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError("Enter a recording name.")
     name = value.strip()
-    # Leave room under common 255-byte filename limits for sidecars and collision suffixes.
     try:
-        size = len(name.encode("utf-8"))
+        name.encode("utf-8")
     except UnicodeEncodeError:
         raise ValueError("This name contains invalid text. Choose another name.") from None
-    if size > 200:
+    if len(name) > 200:
         raise ValueError("This name is too long. Use a shorter name.")
-    if name.startswith(".") or name.endswith(".") or _NOT_IN_NAMES.search(name):
-        raise ValueError('Use a name without a leading/trailing dot or <>:"/\\|?* characters.')
-    # Windows reserves these names even with an extension (for example CON.m4a).
-    stem = name.split(".", 1)[0].rstrip(" ").upper()
-    if stem in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} or re.fullmatch(
-            r"(?:COM|LPT)[1-9¹²³]", stem):
-        raise ValueError("This name is reserved by Windows. Choose another name.")
+    if any(ord(character) < 32 or ord(character) == 127 for character in name):
+        raise ValueError("Use a single-line name without control characters.")
     return name
 
 

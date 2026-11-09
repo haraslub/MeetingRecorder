@@ -255,16 +255,17 @@ def test_rename_move_and_delete_change_the_files(control, tmp_path_factory):
     audio = add_recording(output, "2026-11-05 10-00-00", transcript=True)
     renamed = control.call("POST", "/v1/recordings/rename",
                            {"recording": "latest", "name": "Client call"})
-    assert renamed["recording"]["id"] == "Client call/Client call.m4a"
-    assert not audio.exists()
+    assert renamed["recording"]["id"] == "2026-11-05 10-00-00/2026-11-05 10-00-00.m4a"
+    assert renamed["recording"]["name"] == "Client call"
+    assert audio.exists()
     assert refused(control.call, "POST", "/v1/recordings/rename",
-                   {"recording": "latest", "name": "a/b"}) == (400, "bad_request")
+                   {"recording": "latest", "name": "a\nb"}) == (400, "bad_request")
 
     archive = tmp_path_factory.mktemp("archive")
     moved = control.call("POST", "/v1/recordings/move",
                          {"recording": "latest", "destination": str(archive)})
-    assert Path(moved["path"]) == archive / "Client call" / "Client call.m4a"
-    assert (archive / "Client call" / "Client call.md").exists()
+    assert Path(moved["path"]) == archive / audio.parent.name / audio.name
+    assert (archive / audio.parent.name / audio.with_suffix(".md").name).exists()
 
     add_recording(output, "Old")
     control.call("POST", "/v1/recordings/delete", {"recording": "Old"})
@@ -284,12 +285,37 @@ def test_a_busy_recording_is_neither_processed_nor_changed(control):
     control.window._busy_kinds.clear()
 
 
-@pytest.mark.parametrize("name", ["", "../escape", ".hidden", "CON", "NUL.txt", "LPT1"])
-def test_api_rename_uses_the_shared_filename_rules(control, name):
+@pytest.mark.parametrize("name", ["", "a\nb", "bad\x00name", "x" * 201])
+def test_api_rename_uses_the_shared_display_name_rules(control, name):
     audio = add_recording(control.window.config["output_dir"], "Original")
     assert refused(control.call, "POST", "/v1/recordings/rename",
                    {"recording": "Original", "name": name}) == (400, "bad_request")
     assert audio.exists()
+
+
+def test_api_renames_busy_recordings_without_changing_ids_or_creating_name_paths(control):
+    audio = add_recording(control.window.config["output_dir"], "Original", transcript=True)
+    control.window._busy_paths.add(str(audio))
+    control.window._busy_kinds[str(audio)] = "transcribe"
+    result = control.call("POST", "/v1/recordings/rename",
+                          {"recording": "Original", "name": "slides"})["recording"]
+    assert result["id"] == "Original/Original.m4a"
+    assert result["path"] == str(audio)
+    assert result["name"] == "slides"
+    assert result["processing"] == "transcribe"
+    assert audio.with_suffix(".md").read_text() == "# transcript"
+    control.window._busy_paths.clear()
+
+
+def test_api_duplicate_display_names_require_stable_ids(control):
+    output = control.window.config["output_dir"]
+    for name in ("First", "Second"):
+        add_recording(output, name)
+        control.call("POST", "/v1/recordings/rename", {"recording": name, "name": "Same title"})
+    assert refused(control.call, "GET", "/v1/recordings/get", None,
+                   {"recording": "Same title"}) == (409, "ambiguous")
+    result = control.call("GET", "/v1/recordings/get", query={"recording": "First/First.m4a"})
+    assert result["recording"]["name"] == "Same title"
 
 
 def test_transcription_and_summary_explain_what_is_missing(control, monkeypatch):

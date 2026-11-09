@@ -82,8 +82,8 @@ Each row offers one action for its state:
 | Done | Transcribed | **Open** the transcript |
 | Failed | Failed, with **See details** | **Retry** |
 
-The **⋯** menu holds **Clean up with AI…**, **Open folder**, **Copy folder name**,
-**Move to folder…** and **Delete…**. Copy folder name puts the folder name on the clipboard.
+The **⋯** menu holds **Clean up with AI…**, **Open folder**, **Copy recording name**,
+**Move to folder…** and **Delete…**. Copy recording name puts its displayed title on the clipboard.
 Move moves the whole folder. Delete asks first, removes the recording with all its side files
 and slides, and removes the folder when nothing else is in it.
 A recording that is queued or being processed cannot be moved or deleted until its job ends.
@@ -299,7 +299,8 @@ transcript files it gets back. The API listens on `127.0.0.1` only and needs a t
 ![Settings, AI agents tab](docs/screenshots/settings-ai-agents.png)
 
 Click a saved recording's name to rename it. Press **Enter** to save, or **Escape** to cancel.
-The folder, audio and side files rename together. Recordings being processed cannot be renamed.
+Only the displayed title changes; folder, audio and side-file paths stay stable. You can rename
+while playback or transcription continues. Names can contain punctuation or match another title.
 The active recording card also shows an editable name. A name you choose is kept when the
 recording is saved or recovered after a crash; later meeting detection does not replace it.
 
@@ -516,8 +517,8 @@ matching settings, retrieves an existing job after a crash or network failure. J
 on explicit action, never automatically at startup. If a submission response was lost before
 the job ID was saved, the app stops and asks you to check Soniox rather than submit another
 paid job. Interrupted jobs from versions before job IDs were saved cannot be recovered from
-local state, and retrying them may incur another charge. Moves, renames and deletes share the
-lock and carry the side files along. See
+local state, and retrying them may incur another charge. Moves and deletes share the lock
+and carry the side files along. Display-name changes update metadata without moving files. See
 [batch transcription architecture](docs/architecture/batch-transcription.md).
 
 Exit codes: `0` completed/skipped/dry-run, `1` operational failure, `2` invalid input,

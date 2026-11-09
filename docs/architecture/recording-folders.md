@@ -55,36 +55,43 @@ is named by the creation time of its microphone WAV, the start of the recording.
 **Library.** `RecordingManager.scan` lists `<output>/<name>/<name>.m4a` and any M4A directly in
 the output folder. `Recording.folder` is the recording's folder, or `""` for a recording
 directly in the output folder. The Slides badge (`SLIDES`) shows when `slides.md` exists and
-opens the folder. The row menu **⋯** has **Open folder** and **Copy folder name**; Copy is
-disabled for a recording without its own folder, and Open then opens the output folder.
+opens the folder. The row menu **⋯** has **Open folder** and **Copy recording name**. Copy
+uses the display name, also for recordings without a folder; Open uses the actual directory.
 
-**Move, rename, delete.** `_transfer` creates the target folder and refuses one that exists,
+**Move and delete.** `_transfer` creates the target folder and refuses one that exists,
 so two recordings never mix. It moves the M4A, the sidecars and the snapshot files with the
 transcription locks of both paths held, restores what moved when a file fails, then removes the
 old folder if it is empty. Files a person added to the folder stay in the old folder. Delete
 removes the M4A, the sidecars, the snapshots and `slides.md`, then the folder if it is empty.
+The `<audio stem>.recording.json` metadata is included in these operations. Transfer plans
+reject duplicate source/destination paths before moving any media, so an old recording
+named `slides` cannot overwrite its transcript with the fixed `slides.md` index in migration.
 
 **Inline rename.** Click the name in a saved recording's row to edit the full name in place.
 Keyboard users can focus the name and press Enter, Space or F2. Enter saves; Escape or moving
 focus to another control cancels. Switching applications keeps the draft. An unchanged name
-does nothing. The extension is not shown in the
-editor. A successful rename updates the folder, audio and side files together and highlights
-the updated row. Playback of that recording stops before moving its files.
+does nothing. Renaming changes only the JSON display name and highlights the updated row.
+The folder, audio, transcripts, slide index and processing checkpoints keep their paths.
+Playback and transcription can continue while the display name changes.
 
 `ui/recording_name.py` owns editing and inline errors. `RecordingListWidget` forwards the
-path and proposed name to `MainWindow.rename_recording`, which checks the processing state
-and uses the existing manager transfer. Unchanged rows are reused during library refreshes,
+path and proposed name to `MainWindow.rename_recording`, which uses the manager's metadata
+writer. Unchanged rows are reused during library refreshes,
 so completion of another recording does not discard the draft, cursor or error message.
-Processing disables editing; if processing begins during an edit, the draft is cancelled.
-Filesystem failures and conflicts preserve the original files and leave the attempted name
+Processing does not disable title editing. A failed metadata write leaves the attempted name
 in the editor for correction. A removed or changed row is rebuilt from disk.
 
-Both the UI and API use `recordings.naming.recording_name`. The manager validates again before
-any filesystem change. It trims outer spaces and rejects empty names, leading/trailing dots,
-path separators, control characters, Windows-invalid characters and reserved device names.
-This prevents a renamed recording from disappearing from the library as a hidden file or
-escaping its folder. Existing files and folders are never overwritten. A case-only rename
-can be refused as an existing folder on a filesystem that ignores case.
+**Metadata.** `recordings/metadata.py` owns `<audio stem>.recording.json`, containing
+`{"display_name": "Q4: budget / plan"}`. The scanner falls back to the existing filename when
+metadata is missing or unreadable. Writes preserve other JSON fields, refuse corrupt JSON,
+and replace the metadata atomically through an owner-only temporary file. A failed write
+preserves the prior metadata. Existing folders and files are not migrated for display names.
+
+The UI, API and metadata writer share `recordings.naming.display_name`: trim outer spaces,
+require valid Unicode and a nonempty single line of at most 200 characters. Punctuation,
+`slides`, case changes and duplicate display names are allowed, since names never become
+paths. API `name` is the display name; `id` and `path` stay stable. When display names match,
+the API refuses an ambiguous name and clients must use the recording's id or path.
 
 **Name during recording.** The active card shows the timestamp and detected subject, using
 the same inline editor. Enter commits a full custom name; later detection cannot replace it.
@@ -93,11 +100,12 @@ Escape restores the latest committed/default name. Stopping cancels an uncommitt
 disables editing; an unresolved stop keeps the committed name visible for retry.
 
 The custom name is stored separately from the detected meeting subject. It is written to the
-live journal immediately and used by `new_recording_path` when capture stops. Existing folders
-get a numbered suffix rather than being overwritten. No open capture file is renamed. Each
-new recording clears the custom name. Recovery validates the optional journal `name`; older
-journals still use their detected subject. Names are limited to 200 UTF-8 bytes to leave room
-for sidecar extensions and collision suffixes under common filesystem limits.
+live journal immediately as `display_name`, then written to metadata after successful audio
+encoding. The pending encoder entry owns that name, so another capture cannot replace it.
+Output paths still use the original timestamp/detected subject and collision suffix rules.
+Each new recording clears the display-name override. Recovery accepts both the new journal
+field and the earlier `name` field as display text; neither is used as a path. A metadata-write
+failure reports that the audio is safe and retains the journal containing the chosen name.
 
 **Migration.** `MainWindow.__init__` calls `RecordingManager.migrate` before the first list.
 Each M4A directly in the output folder (hidden staging files excluded) moves into its own
@@ -122,12 +130,15 @@ transcription, stays and is tried again at the next start; the status bar names 
 `tests/test_recording_folders.py` covers the title rules, folder names, a taken name, scan,
 move of a whole folder, a taken target folder, added files in the old folder, rename, delete
 with and without added files, and the migration with old slides and a locked recording.
-`tests/test_recording_menu.py` covers **Open folder**, **Copy folder name** and the Slides badge.
+`tests/test_recording_menu.py` covers **Open folder**, **Copy recording name** and the Slides badge.
 `tests/test_inline_rename.py` exercises mouse and keyboard editing, cancellation, errors and
 correction, busy guards, Unicode names, all side files and drafts across library refreshes.
-The folder and API tests also enforce the shared filename rules.
+The folder and API tests also enforce the shared display-name rules.
 `tests/test_active_recording_name.py` covers default/detected names, editing while recording,
 immediate journaling, cancellation, stopping/retry states, final output naming and reset.
 The live-journal recovery test also checks a real recovered recording with a custom name.
+`tests/test_recording_metadata.py` checks stable media paths, safe `slides` display names,
+metadata preservation, failed atomic writes, corrupt JSON, busy jobs, move/delete lifecycle
+and the legacy duplicate-destination regression.
 `tests/test_slides_toggle.py` covers a recording named after the Teams window title with its
 snapshots in the folder; `tests/test_session_recovery.py` covers the recovered folder.

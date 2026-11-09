@@ -11,7 +11,7 @@ import logging
 import os
 from pathlib import Path
 
-from audiorecorder.recordings.naming import recording_name
+from audiorecorder.recordings.naming import display_name
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ def journal_for_capture(mic_path):
 def encode(title, subtitles, speakers, *, name=None):
     """The journal text; subtitles and speakers are the payloads the sidecar writers take."""
     return json.dumps(
-        {"title": title, "subtitles": subtitles, "speakers": speakers, "name": name},
+        {"title": title, "subtitles": subtitles, "speakers": speakers, "display_name": name},
         ensure_ascii=False)
 
 
@@ -57,7 +57,7 @@ def load(path):
         return "", None, None, None
     title = data.get("title")
     try:
-        name = recording_name(data.get("name"))
+        name = display_name(data.get("display_name", data.get("name")))
     except ValueError:
         name = None
     return (

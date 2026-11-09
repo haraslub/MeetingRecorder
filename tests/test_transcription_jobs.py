@@ -166,7 +166,8 @@ def test_checkpoint_follows_renamed_audio_and_can_resume(setup_worker, monkeypat
     worker.error.connect(errors.append)
     worker.run()
     assert not errors
-    assert audio.with_name('renamed.md').exists()
+    assert renamed == str(audio)
+    assert audio.with_suffix('.md').exists()
     assert calls == ['upload', 'submit']
 
 

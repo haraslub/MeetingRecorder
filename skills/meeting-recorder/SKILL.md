@@ -19,8 +19,9 @@ python <skill-directory>/mrctl.py <command> [options]
   The user is responsible for telling the other participants that the call is recorded.
 - **Billed actions only on request:** `transcribe`, `toggles --subtitles on` and
   `toggles --live-speakers on` use paid Soniox minutes. `summarize` runs the local Claude CLI.
-- **Irreversible actions only on an explicit request that names the recording:** `delete`, `move`,
-  `rename`. Run `recordings` first and act on the `id` it returns, never on a guess.
+- **Changes only on an explicit request that names the recording:** `delete`, `move`, `rename`.
+  Run `recordings` first and act on the `id` it returns, never on a guess. Rename changes only
+  a display title; file paths and ids stay stable, also during transcription or playback.
 - **Every wait is bounded.** `--wait` stops after `--timeout` seconds (default 600) with exit 5.
   Do not loop around it; report the state instead.
 - **Never print or quote the token.** The client reads it from `api.json`; you do not need it.
@@ -44,7 +45,7 @@ python <skill-directory>/mrctl.py <command> [options]
 | `transcribe <ref> [--wait]` | Soniox transcription into `<name>.md` |
 | `summarize <ref> [--overwrite] [--wait]` | Cleaned transcript and summary into `<name>.summary.md` |
 | `import <file> [--overwrite]` | Copy an audio file into the library |
-| `rename <ref> <name>` | Rename the recording, its side files and its folder |
+| `rename <ref> <name>` | Change the JSON display title; file paths stay stable |
 | `move <ref> <folder>` | Move the recording folder elsewhere; it leaves the library |
 | `delete <ref>` | Delete the recording, its side files and slides |
 | `dictation on\|off` | Push-to-talk dictation mode |

@@ -31,6 +31,10 @@ only a shell command, and the application needs no new dependency.
   or the absolute path. Only recordings the library lists can be named, so delete, rename and
   move cannot reach other files. The library lists M4A files only: an imported MP3 is copied
   but answers `recording: null`.
+- **Display names.** Rename changes only `display_name` in the recording's JSON metadata.
+  Response `name` shows this title; `id`, `path`, folder, playback and processing stay stable.
+  Renaming is allowed while busy. Duplicate titles are allowed, so prefer ids; ambiguous name
+  references receive 409. Metadata travels with move/delete and preserves older filename fallbacks.
 - **Long jobs.** Start, stop, transcription and summary return at once. The client's `--wait`
   polls status once a second up to `--timeout` (default 600 s); `stop --wait` reports the
   recordings that are new after the save.

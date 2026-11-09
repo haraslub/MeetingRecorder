@@ -62,7 +62,7 @@ class RecordingItemWidget(QFrame):
     delete_clicked = pyqtSignal(str)
     open_transcript_clicked = pyqtSignal(str)
     open_folder_clicked = pyqtSignal(str)
-    copy_folder_name_clicked = pyqtSignal(str)
+    copy_name_clicked = pyqtSignal(str)
     details_clicked = pyqtSignal(str)
 
     def __init__(self, recording):
@@ -180,7 +180,6 @@ class RecordingItemWidget(QFrame):
     def set_processing(self, message, busy, kind=None):
         self._message = message
         self._busy = busy
-        self._name.set_busy(busy)
         if kind is not None:
             self._kind = kind
         self._render()
@@ -267,12 +266,9 @@ class RecordingItemWidget(QFrame):
         folder = self.recording.folder or os.path.dirname(self.recording.path)
         open_folder = menu.addAction(icons.icon("folder-open", tint, 16), "Open folder")
         open_folder.triggered.connect(lambda: self.open_folder_clicked.emit(folder))
-        copy_name = menu.addAction(icons.icon("copy", tint, 16), "Copy folder name")
-        copy_name.setEnabled(bool(self.recording.folder))
+        copy_name = menu.addAction(icons.icon("copy", tint, 16), "Copy recording name")
         copy_name.triggered.connect(
-            lambda: self.copy_folder_name_clicked.emit(self.recording.folder))
-        if not self.recording.folder:
-            copy_name.setToolTip("This recording has no folder of its own")
+            lambda: self.copy_name_clicked.emit(self.recording.name))
         move = menu.addAction(icons.icon("folder-input", tint, 16), "Move to folder…")
         move.triggered.connect(lambda: self.move_clicked.emit(self.recording.path))
         menu.addSeparator()
@@ -334,7 +330,7 @@ class RecordingListWidget(QWidget):
     delete_requested = pyqtSignal(str)
     open_transcript_requested = pyqtSignal(str)
     open_folder_requested = pyqtSignal(str)
-    copy_folder_name_requested = pyqtSignal(str)
+    copy_name_requested = pyqtSignal(str)
     details_requested = pyqtSignal(str)
     add_requested = pyqtSignal()
 
@@ -455,7 +451,7 @@ class RecordingListWidget(QWidget):
                 item_widget.delete_clicked.connect(self.delete_requested.emit)
                 item_widget.open_transcript_clicked.connect(self.open_transcript_requested.emit)
                 item_widget.open_folder_clicked.connect(self.open_folder_requested.emit)
-                item_widget.copy_folder_name_clicked.connect(self.copy_folder_name_requested.emit)
+                item_widget.copy_name_clicked.connect(self.copy_name_requested.emit)
                 item_widget.details_clicked.connect(self.details_requested.emit)
                 item_widget.rename_requested.connect(self.rename_requested.emit)
             item_widget.set_processing(*self._processing_states.get(rec.path, ("", False, None)))
@@ -474,12 +470,6 @@ class RecordingListWidget(QWidget):
             if widget.recording.path == path:
                 widget._name.show_error(message)
                 break
-
-    def recording_renamed(self, previous, current):
-        """Keep retry/error state attached to the files after a successful rename."""
-        for states in (self._processing_states, self._failures):
-            if previous in states:
-                states[current] = states.pop(previous)
 
     def set_processing(self, path, message, busy, kind=None):
         if message:
