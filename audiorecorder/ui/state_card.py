@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayou
 
 from audiorecorder.ui import icons, theme
 from audiorecorder.ui.level_bars import DualLevelBars
+from audiorecorder.ui.recording_name import RecordingName
 from audiorecorder.ui.widgets import (
     Chip,
     Dot,
@@ -95,6 +96,9 @@ class StateCard(QFrame):
         for holder in (self._idle_holder, self._rec_holder, self._alert_holder, self._dict_holder):
             left.addWidget(holder)
         left.addWidget(self._slides_text)
+        self.recording_name = RecordingName("")
+        self.recording_name.setObjectName("activeRecordingName")
+        left.addWidget(self.recording_name)
 
         self.timer = QLabel("00:00:00")
         self.timer.setObjectName("timer")
@@ -211,6 +215,12 @@ class StateCard(QFrame):
         set_prop(self.timer, "state", card_state)
 
         recording = state in ("recording", "stopping")
+        if state in ("idle", "starting", "dictation"):
+            self.recording_name.set_name("")
+        self.recording_name.set_busy(state != "recording")
+        self.recording_name.setVisible(
+            state in ("recording", "stopping", "failed")
+            and bool(self.recording_name.label.text()))
         self._idle_holder.setVisible(state in ("idle", "starting"))
         self._idle_text.setText("Starting capture…" if state == "starting" else "Ready to record")
         self._rec_holder.setVisible(recording)
@@ -259,6 +269,11 @@ class StateCard(QFrame):
             self._preview_text.setText("")
             self._pasted_text.setText("")
         self._render_buttons()
+
+    def set_recording_name(self, name):
+        self.recording_name.set_name(name)
+        self.recording_name.setVisible(
+            self._state in ("recording", "stopping", "failed") and bool(name))
 
     def set_slides(self, text):
         """The slide capture state under the recording line; empty hides it."""

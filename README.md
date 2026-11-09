@@ -300,6 +300,8 @@ transcript files it gets back. The API listens on `127.0.0.1` only and needs a t
 
 Click a saved recording's name to rename it. Press **Enter** to save, or **Escape** to cancel.
 The folder, audio and side files rename together. Recordings being processed cannot be renamed.
+The active recording card also shows an editable name. A name you choose is kept when the
+recording is saved or recovered after a crash; later meeting detection does not replace it.
 
 ## Settings
 

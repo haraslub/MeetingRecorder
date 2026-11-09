@@ -39,6 +39,9 @@ and say in the release notes what was not exercised.
       side-file names; Escape and clicking elsewhere cancel. A conflicting or invalid name
       shows an inline error and can be corrected. Processing blocks renaming. Tab to a name
       and use Enter or F2 to edit it. A different recording finishing does not lose the draft.
+- [ ] During recording, click the name in the active card and save a new name with Enter.
+      A later detected meeting title does not replace it. Stop and check that the folder,
+      audio and side files use the chosen name. A second recording starts with a fresh name.
 - [ ] Transcribe a short recording: a `.md` appears with speakers and timestamps
 - [ ] With language `cs` and translation on, transcribe an English recording and confirm the
       Czech translation comes first and the English original follows

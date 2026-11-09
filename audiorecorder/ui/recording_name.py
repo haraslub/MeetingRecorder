@@ -75,6 +75,12 @@ class RecordingName(QWidget):
         self.editor.setFocus()
         self.editor.selectAll()
 
+    def set_name(self, name):
+        """Update the displayed name without discarding an edit already in progress."""
+        self._name = name
+        self.label.setText(name)
+        self.label.setAccessibleName(f"Rename recording: {name}")
+
     def cancel(self):
         self._editing = False
         self._submitting = False

@@ -60,10 +60,11 @@ def _free_name(directory, base):
     return name
 
 
-def new_recording_path(output_dir, started, title=""):
+def new_recording_path(output_dir, started, title="", *, name=None):
     """Create the folder of a new recording and return the path its M4A gets."""
+    base = recording_name(name) if name is not None else folder_name(started, title)
     Path(output_dir).mkdir(parents=True, exist_ok=True)
-    name = _free_name(output_dir, folder_name(started, title))
+    name = _free_name(output_dir, base)
     folder = Path(output_dir) / name
     folder.mkdir()
     return str(folder / f"{name}.m4a")

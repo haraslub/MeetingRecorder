@@ -11,6 +11,8 @@ import logging
 import os
 from pathlib import Path
 
+from audiorecorder.recordings.naming import recording_name
+
 log = logging.getLogger(__name__)
 
 PREFIX = "_rec_live_"
@@ -27,10 +29,11 @@ def journal_for_capture(mic_path):
     return journal_path(mic.parent, mic.stem.removeprefix(MIC_PREFIX))
 
 
-def encode(title, subtitles, speakers):
+def encode(title, subtitles, speakers, *, name=None):
     """The journal text; subtitles and speakers are the payloads the sidecar writers take."""
     return json.dumps(
-        {"title": title, "subtitles": subtitles, "speakers": speakers}, ensure_ascii=False)
+        {"title": title, "subtitles": subtitles, "speakers": speakers, "name": name},
+        ensure_ascii=False)
 
 
 def save(path, text):
@@ -42,21 +45,26 @@ def save(path, text):
 
 
 def load(path):
-    """(title, subtitles, speakers) from a journal; empty values when it is missing or bad."""
+    """(title, subtitles, speakers, custom name); old journals have no custom name."""
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return "", None, None
+        return "", None, None, None
     except (OSError, ValueError):
         log.exception("the live journal %s could not be read", path)
-        return "", None, None
+        return "", None, None, None
     if not isinstance(data, dict):
-        return "", None, None
+        return "", None, None, None
     title = data.get("title")
+    try:
+        name = recording_name(data.get("name"))
+    except ValueError:
+        name = None
     return (
         title if isinstance(title, str) else "",
         _payload(data.get("subtitles")),
         _payload(data.get("speakers")),
+        name,
     )
 
 

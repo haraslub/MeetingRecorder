@@ -8,6 +8,7 @@ files while it records, and start-up recovery puts them into the recovered folde
 # ruff: noqa: F401, F811
 import json
 
+import pytest
 from test_rts_toggle import app, window
 from test_session_recovery import run_window, tone
 
@@ -23,18 +24,32 @@ def test_a_journal_round_trips_its_payloads(tmp_path):
     journal.save(path, journal.encode("Weekly sync", (SUBTITLES, "cs"), (SPEAKERS, {})))
 
     assert journal.journal_for_capture(tmp_path / "_rec_mic_a.wav") == path
-    assert journal.load(path) == ("Weekly sync", (SUBTITLES, "cs"), (SPEAKERS, {}))
+    assert journal.load(path) == ("Weekly sync", (SUBTITLES, "cs"), (SPEAKERS, {}), None)
     assert not path.with_name(path.name + ".tmp").exists()
 
 
 def test_a_missing_or_damaged_journal_gives_nothing(tmp_path):
-    assert journal.load(tmp_path / "_rec_live_none.json") == ("", None, None)
+    assert journal.load(tmp_path / "_rec_live_none.json") == ("", None, None, None)
     damaged = tmp_path / "_rec_live_bad.json"
     damaged.write_text('{"title": "Weekly', encoding="utf-8")
-    assert journal.load(damaged) == ("", None, None)
+    assert journal.load(damaged) == ("", None, None, None)
     damaged.write_text('{"title": 3, "subtitles": [[], "cs"], "speakers": "x"}',
                        encoding="utf-8")
-    assert journal.load(damaged) == ("", None, None)
+    assert journal.load(damaged) == ("", None, None, None)
+
+
+@pytest.mark.parametrize("name,expected", [("Chosen name", "Chosen name"),
+                                         ("../escape", None), (".hidden", None), (123, None)])
+def test_custom_names_are_validated_when_recovered(tmp_path, name, expected):
+    path = journal.journal_path(tmp_path, "name")
+    journal.save(path, journal.encode("Weekly sync", None, None, name=name))
+    assert journal.load(path) == ("Weekly sync", None, None, expected)
+
+
+def test_an_old_journal_without_a_custom_name_still_loads(tmp_path):
+    path = journal.journal_path(tmp_path, "old")
+    path.write_text(json.dumps({"title": "Weekly", "subtitles": [SUBTITLES, "cs"]}))
+    assert journal.load(path) == ("Weekly", (SUBTITLES, "cs"), None, None)
 
 
 def test_a_capture_set_aside_keeps_its_journal(tmp_path):
@@ -62,12 +77,14 @@ def test_the_window_keeps_the_journal_while_recording_and_drops_it_without_audio
     assert not path.exists()
 
 
-def test_start_up_recovery_restores_title_and_live_subtitles(tmp_path):
+@pytest.mark.parametrize("custom_name", [None, "My chosen name"])
+def test_start_up_recovery_restores_title_and_live_subtitles(tmp_path, custom_name):
     tone(tmp_path / "_rec_mic_a.wav")
     tone(tmp_path / "_rec_system_a.wav")
     journal.save(journal.journal_path(tmp_path, "a"),
-                 journal.encode("Weekly sync", (SUBTITLES, "cs"), (SPEAKERS, {"Me": ""})))
-    run_window("""
+                 journal.encode("Weekly sync", (SUBTITLES, "cs"), (SPEAKERS, {"Me": ""}),
+                                name=custom_name))
+    run_window(f"""
         import sys
         from pathlib import Path
         from PyQt6.QtCore import QTimer
@@ -76,7 +93,7 @@ def test_start_up_recovery_restores_title_and_live_subtitles(tmp_path):
 
         app = QApplication([])
         directory = Path(sys.argv[1])
-        window = mw.MainWindow({'output_dir': str(directory), 'meeting_detection': False})
+        window = mw.MainWindow({{'output_dir': str(directory), 'meeting_detection': False}})
 
         def check():
             if not window._encoder_queue and not window._active_encoders:
@@ -90,7 +107,9 @@ def test_start_up_recovery_restores_title_and_live_subtitles(tmp_path):
         folders = [path for path in directory.iterdir() if path.is_dir()]
         assert len(folders) == 1, folders
         folder = folders[0]
-        assert folder.name.endswith(' - Weekly sync'), folder.name
+        expected_name = {custom_name!r}
+        assert (folder.name == expected_name if expected_name else
+                folder.name.endswith(' - Weekly sync')), folder.name
         files = sorted(path.name for path in folder.iterdir())
         assert files == sorted(folder.name + suffix for suffix in (
             '.m4a', '.live.md', '.speakers.md', '.speakers.json')), files

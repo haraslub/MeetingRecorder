@@ -274,6 +274,8 @@ QFrame#row:hover { background-color: @bg.hover; }
 QFrame#row[playing="true"] { background-color: @bg.selected; }
 QFrame#row QLabel#name { font-size: 14px; font-weight: 600; }
 QFrame#row QLabel#name:focus { color: @accent; }
+QWidget#activeRecordingName QLabel#name { font-size: 14px; font-weight: 600; }
+QWidget#activeRecordingName QLabel#name:focus { color: @accent; }
 QLabel#renameError { color: @error; font-size: 12px; }
 QFrame#row QLabel#duration { font-family: "JetBrains Mono"; font-size: 12px;
     color: @text.secondary; }

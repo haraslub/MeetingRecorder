@@ -86,6 +86,19 @@ This prevents a renamed recording from disappearing from the library as a hidden
 escaping its folder. Existing files and folders are never overwritten. A case-only rename
 can be refused as an existing folder on a filesystem that ignores case.
 
+**Name during recording.** The active card shows the timestamp and detected subject, using
+the same inline editor. Enter commits a full custom name; later detection cannot replace it.
+Detection can update the displayed default while an edit is open without changing the draft.
+Escape restores the latest committed/default name. Stopping cancels an uncommitted edit and
+disables editing; an unresolved stop keeps the committed name visible for retry.
+
+The custom name is stored separately from the detected meeting subject. It is written to the
+live journal immediately and used by `new_recording_path` when capture stops. Existing folders
+get a numbered suffix rather than being overwritten. No open capture file is renamed. Each
+new recording clears the custom name. Recovery validates the optional journal `name`; older
+journals still use their detected subject. Names are limited to 200 UTF-8 bytes to leave room
+for sidecar extensions and collision suffixes under common filesystem limits.
+
 **Migration.** `MainWindow.__init__` calls `RecordingManager.migrate` before the first list.
 Each M4A directly in the output folder (hidden staging files excluded) moves into its own
 folder: `Recording 2026-11-04 10-00-00 1a2b3c4d` becomes `2026-11-04 10-00-00`, other names
@@ -113,5 +126,8 @@ with and without added files, and the migration with old slides and a locked rec
 `tests/test_inline_rename.py` exercises mouse and keyboard editing, cancellation, errors and
 correction, busy guards, Unicode names, all side files and drafts across library refreshes.
 The folder and API tests also enforce the shared filename rules.
+`tests/test_active_recording_name.py` covers default/detected names, editing while recording,
+immediate journaling, cancellation, stopping/retry states, final output naming and reset.
+The live-journal recovery test also checks a real recovered recording with a custom name.
 `tests/test_slides_toggle.py` covers a recording named after the Teams window title with its
 snapshots in the folder; `tests/test_session_recovery.py` covers the recovered folder.

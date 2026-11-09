@@ -24,6 +24,13 @@ def recording_name(value):
     if not isinstance(value, str) or not value.strip():
         raise ValueError("Enter a recording name.")
     name = value.strip()
+    # Leave room under common 255-byte filename limits for sidecars and collision suffixes.
+    try:
+        size = len(name.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise ValueError("This name contains invalid text. Choose another name.") from None
+    if size > 200:
+        raise ValueError("This name is too long. Use a shorter name.")
     if name.startswith(".") or name.endswith(".") or _NOT_IN_NAMES.search(name):
         raise ValueError('Use a name without a leading/trailing dot or <>:"/\\|?* characters.')
     # Windows reserves these names even with an extension (for example CON.m4a).

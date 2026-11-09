@@ -65,6 +65,15 @@ def test_a_new_recording_gets_its_own_folder_and_a_free_name(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == [NAME]
 
 
+@pytest.mark.parametrize("name", ["../escape", ".hidden", "", "CON", "x" * 201,
+                                  "🎙" * 51, "bad\ud800name"])
+def test_custom_capture_name_is_validated_before_creating_the_output_directory(tmp_path, name):
+    output = tmp_path / "not-created"
+    with pytest.raises(ValueError):
+        new_recording_path(output, STARTED, name=name)
+    assert not output.exists()
+
+
 def test_scan_lists_folder_recordings_with_their_folder_and_slides(tmp_path):
     audio = make_folder_recording(tmp_path)
     (tmp_path / "loose.m4a").write_bytes(b"audio")
